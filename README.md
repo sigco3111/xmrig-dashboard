@@ -233,20 +233,27 @@ python3 miner-dashboard.py
 | `$XMRIG_CONFIG` 환경변수 | 설정 경로 override |
 | `$XMRIG_LOG` 환경변수 | 로그 경로 override |
 
-## 문서
+## Documentation
+
+| Doc                                       | What's in it                              |
+| ----------------------------------------- | ----------------------------------------- |
+| [docs/xmr-overview.md](docs/xmr-overview.md) | What is XMR? History, technology, comparisons, real use, FAQ |
+| [docs/getting-started.md](docs/getting-started.md) | Wallet setup, XMRig config, first run |
+| [docs/dashboard.md](docs/dashboard.md)             | Panel-by-panel reference             |
+| [docs/exchanges.md](docs/exchanges.md)             | Choosing an exchange, getting a real XMR address, avoiding scam tokens |
+| [docs/supportxmr.md](docs/supportxmr.md)           | Using SupportXMR (and pool choice)  |
+| [docs/security.md](docs/security.md)               | Threat model, best practices         |
+
+## 문서 (한국어)
 
 | 문서 | 내용 |
 | --- | --- |
-| [docs/getting-started.ko.md](docs/getting-started.ko.md) | 지갑/설정/첫 실행 (한국어) |
-| [docs/getting-started.md](docs/getting-started.md) | 같은 내용 (영어) |
-| [docs/dashboard.ko.md](docs/dashboard.ko.md) | 패널별 상세 (한국어) |
-| [docs/dashboard.md](docs/dashboard.md) | 같은 내용 (영어) |
-| [docs/exchanges.ko.md](docs/exchanges.ko.md) | 거래소 선택, XMR 주소, 스캠 구분 (한국어) |
-| [docs/exchanges.md](docs/exchanges.md) | 같은 내용 (영어) |
-| [docs/supportxmr.ko.md](docs/supportxmr.ko.md) | SupportXMR 사용법 (한국어) |
-| [docs/supportxmr.md](docs/supportxmr.md) | 같은 내용 (영어) |
-| [docs/security.ko.md](docs/security.ko.md) | 보안 모범 사례 (한국어) |
-| [docs/security.md](docs/security.md) | 같은 내용 (영어) |
+| [docs/xmr-overview.ko.md](docs/xmr-overview.ko.md) | XMR이란? 역사, 기술, 비교, 실사용, FAQ |
+| [docs/getting-started.ko.md](docs/getting-started.ko.md) | 지갑/설정/첫 실행 |
+| [docs/dashboard.ko.md](docs/dashboard.ko.md) | 패널별 상세 |
+| [docs/exchanges.ko.md](docs/exchanges.ko.md) | 거래소 선택, XMR 주소, 스캠 구분 |
+| [docs/supportxmr.ko.md](docs/supportxmr.ko.md) | SupportXMR 사용법 |
+| [docs/security.ko.md](docs/security.ko.md) | 보안 모범 사례 |
 
 > 모든 문서는 한/영 모두 제공됩니다. 한국어가 더 편하시면 `.ko.md` 버전을,
 > 영어가 편하시면 원본을 사용하세요. 두 버전의 내용은 동일합니다.
