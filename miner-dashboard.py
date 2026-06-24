@@ -491,16 +491,17 @@ class MinerDashboard(App):
     Screen {{
         background: {PALETTE['bg']};
         color: {PALETTE['fg']};
+        padding: 1 2;
     }}
     #main {{
         layout: grid;
         grid-size: 2 3;
         grid-gutter: 1;
-        padding: 1;
+        padding: 1 2 1 2;
     }}
     HashratePanel, SystemPanel, PoolPanel, EarningsPanel, LogPanel {{
         border: solid {PALETTE['fg_dim']};
-        padding: 1;
+        padding: 1 2;
         background: {PALETTE['bg']};
     }}
     /* All panel borders in cyberpunk green; brightness varies by role */
@@ -519,11 +520,13 @@ class MinerDashboard(App):
     StatusBar {{
         dock: top;
         height: 1;
+        margin: 0 2 1 2;
         background: {PALETTE['bg_dark']};
         color: {PALETTE['fg']};
     }}
     #hint {{
         height: 1;
+        margin: 0 2;
         color: {PALETTE['fg_dim']};
         text-align: center;
     }}
