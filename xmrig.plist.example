@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Example macOS LaunchAgent for running XMRig in the background.
+
+  To use:
+    1. Copy this file to ~/Library/LaunchAgents/com.local.xmrig.plist
+    2. Replace /path/to/xmrig and /path/to/xmrig-config.json with your real paths
+    3. Replace /path/to/xmrig.log with where you want the log to be written
+    4. Run: launchctl load ~/Library/LaunchAgents/com.local.xmrig.plist
+    5. To unload: launchctl unload ~/Library/LaunchAgents/com.local.xmrig.plist
+
+  The miner-dashboard.py will pick up the same log/config if you set
+  XMRIG_LOG and XMRIG_CONFIG env vars in the dashboard's launch script.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.local.xmrig</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/xmrig</string>
+        <string>--config=/path/to/xmrig-config.json</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/path/to/xmrig.log</string>
+    <key>StandardErrorPath</key>
+    <string>/path/to/xmrig.log</string>
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>

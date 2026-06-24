@@ -1,0 +1,35 @@
+# Logs and runtime artifacts
+*.log
+*.pid
+*.swp
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.idea/
+.vscode/
+*.iml
+
+# Secrets — never commit your actual xmrig config
+xmrig-config.json
+.env
+.env.local
