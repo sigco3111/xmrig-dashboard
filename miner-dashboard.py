@@ -963,17 +963,18 @@ class MinerDashboard(App):
         grid-gutter: 1;
         padding: 1 2 1 2;
     }}
-    HashratePanel, SystemPanel, PoolPanel, EarningsPanel, LogPanel {{
+    HashratePanel, SystemPanel, PoolPanel, EarningsPanel, LogPanel, CoreHeatmapPanel {{
         border: solid {PALETTE['fg_dim']};
         padding: 0 2;
         background: {PALETTE['bg']};
     }}
     /* All panel borders in cyberpunk green; brightness varies by role */
-    HashratePanel {{ border: solid {PALETTE['accent']}; }}
-    SystemPanel   {{ border: solid {PALETTE['fg']}; }}
-    PoolPanel     {{ border: solid {PALETTE['fg_dim']}; }}
-    EarningsPanel {{ border: solid {PALETTE['fg']}; }}
-    LogPanel      {{ border: solid {PALETTE['fg_faint']}; }}
+    HashratePanel    {{ border: solid {PALETTE['accent']}; }}
+    SystemPanel      {{ border: solid {PALETTE['fg']}; }}
+    PoolPanel        {{ border: solid {PALETTE['fg_dim']}; }}
+    EarningsPanel    {{ border: solid {PALETTE['fg']}; }}
+    LogPanel         {{ border: solid {PALETTE['fg_faint']}; }}
+    CoreHeatmapPanel {{ border: solid {PALETTE['accent']}; }}
     /* Pulse states: alternated by refresh tick to simulate animation */
     HashratePanel.-mining-active {{
         border: solid {PALETTE['accent']};
