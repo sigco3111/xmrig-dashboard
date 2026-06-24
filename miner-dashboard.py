@@ -86,6 +86,17 @@ LOG_LINES = 200
 # Sparkline history length (60 samples = 30s at 2Hz)
 SPARKLINE_SAMPLES = 60
 
+# Approximate Monero network hashrate (in H/s, used for "share of network" calc)
+# Updated manually; accurate to ~+/-15% over months. The actual value is on
+# the order of 5-6 GH/s (mid-2026). Sources: miningpoolstats.stream, coinwarz.com
+MONERO_NETWORK_HASHRATE_HPS = 5.5e9  # 5.5 GH/s — adjust quarterly
+
+# Estimated power draw in watts (Mac mini i5-8500B full load)
+ESTIMATED_MINING_WATTS = 45
+
+# Power cost per kWh in USD (~$0.13 US average; adjust for your region)
+POWER_COST_PER_KWH = 0.13
+
 # ---------- NMMiner cyberpunk-green palette ----------
 # All panel colors derive from these. Tweak in one place.
 PALETTE = {
@@ -402,8 +413,9 @@ class PoolPanel(Static):
 
 
 class EarningsPanel(Static):
-    """Mining stats + earnings estimate."""
+    """Mining stats + earnings estimate + network share + break-even."""
     def render(self) -> str:
+        import time as _t
         s = self.app.state.get("xmrig", _DEFAULT_STATE)
         e = self.app.state.get("earnings", {"xmr_price": XMR_USD_PRICE})
         hr_10 = s.get("hashrate_10s", 0.0)
@@ -427,13 +439,52 @@ class EarningsPanel(Static):
             else:
                 rej_pct_str = f"[#33ff66]{rej_pct:.1f}%[/#33ff66]"
 
-        # Compact mode: collapse the forecast into one line
+        # === New: network share ===
+        network_share = hr_avg / MONERO_NETWORK_HASHRATE_HPS * 100
+        if network_share < 0.0001:
+            share_str = f"[#1f8033]{network_share:.6f}%[/#1f8033]"
+        elif network_share < 0.01:
+            share_str = f"[#ccffdd]{network_share:.5f}%[/#ccffdd]"
+        else:
+            share_str = f"[#ccffdd]{network_share:.4f}%[/#ccffdd]"
+        net_ghs = MONERO_NETWORK_HASHRATE_HPS / 1e9
+
+        # === New: session statistics ===
+        session_secs = _t.time() - self.app._session_start
+        session_h = int(session_secs // 3600)
+        session_m = int((session_secs % 3600) // 60)
+        sess_acc = sum(self.app._accepted_history)
+        sess_rej = sum(self.app._rejected_history)
+        sess_total = sess_acc + sess_rej
+        if sess_total > 0 and session_secs > 0:
+            sess_per_hour = sess_total / (session_secs / 3600)
+        else:
+            sess_per_hour = 0
+
+        # === New: break-even analysis ===
+        # 45W × 24h = 1080 Wh = 1.08 kWh/day. At $0.13/kWh = $0.14/day
+        daily_kwh = ESTIMATED_MINING_WATTS * 24 / 1000
+        daily_power_cost = daily_kwh * POWER_COST_PER_KWH
+        if usd_per_day > 0:
+            daily_net = usd_per_day - daily_power_cost
+            if daily_net < 0:
+                net_str = f"[bold #ff3355]${daily_net:.4f}/day (loss)[/bold #ff3355]"
+            elif daily_net < 0.01:
+                net_str = f"[bold #ffaa00]${daily_net:.4f}/day (break-even)[/bold #ffaa00]"
+            else:
+                net_str = f"[#33ff66]${daily_net:.4f}/day profit[/#33ff66]"
+        else:
+            net_str = "[#1f8033]n/a[/#1f8033]"
+
+        # Compact mode: collapse to essentials
         if self.app._compact_mode:
             h = (
                 f"[bold #33ff66] MINING STATS [/bold #33ff66]\n\n"
                 f"  [#1f8033]shares[/#1f8033] [#ccffdd]{accepted}[/#ccffdd] ok / [bold #ff3355]{rejected}[/bold #ff3355] bad\n"
-                f"  [#1f8033]last[/#1f8033]   [#ccffdd]{last_share or 'n/a'}[/#ccffdd]\n"
+                f"  [#1f8033]session[/#1f8033] [#ccffdd]{session_h}h{session_m:02d}m[/#ccffdd] [#1f8033]({sess_per_hour:.1f}/h)[/#1f8033]\n"
+                f"  [#1f8033]net share[/#1f8033] {share_str} [dim #1f8033]of {net_ghs:.1f}GH/s[/dim #1f8033]\n"
                 f"  [#1f8033]est/day[/#1f8033] [#ccffdd]{usd_per_day:.4f}[/#ccffdd] [#1f8033]@ ${price:.2f}[/#1f8033]\n"
+                f"  [#1f8033]break-even[/#1f8033] {net_str}\n"
             )
             return h
 
@@ -441,12 +492,18 @@ class EarningsPanel(Static):
             f"[bold #33ff66] MINING STATS [/bold #33ff66]\n\n"
             f"  [#1f8033]accepted[/#1f8033]   [#ccffdd]{accepted:>5d}[/#ccffdd]\n"
             f"  [#1f8033]rejected[/#1f8033]   [bold #ff3355]{rejected:>5d}[/bold #ff3355]\n"
-            f"  [#1f8033]last share[/#1f8033] [#ccffdd]{last_share or 'n/a'}[/#ccffdd]\n\n"
+            f"  [#1f8033]last share[/#1f8033] [#ccffdd]{last_share or 'n/a'}[/#ccffdd]\n"
+            f"  [#1f8033]session[/#1f8033]    [#ccffdd]{session_h}h{session_m:02d}m[/#ccffdd] [#1f8033]({sess_per_hour:.1f} shares/h)[/#1f8033]\n\n"
             f"  [bold #ccffdd]EARNINGS ESTIMATE[/bold #ccffdd] [#1f8033](XMR: ${price:.2f})[/#1f8033]\n"
             f"  [#1f8033]daily[/#1f8033]      [#ccffdd]{xmr_per_day:.6f}[/#ccffdd] XMR  [#1f8033]=[/#1f8033] [#ccffdd]${usd_per_day:.4f}[/#ccffdd]\n"
             f"  [#1f8033]monthly[/#1f8033]    [#ccffdd]{xmr_per_day*30:.4f}[/#ccffdd] XMR  [#1f8033]=[/#1f8033] [#ccffdd]${usd_per_day*30:.2f}[/#ccffdd]\n"
             f"  [#1f8033]yearly[/#1f8033]     [#ccffdd]{xmr_per_day*365:.3f}[/#ccffdd] XMR  [#1f8033]=[/#1f8033] [#ccffdd]${usd_per_day*365:.2f}[/#ccffdd]\n\n"
-            f"  [#1f8033]reject rate: {rej_pct_str} | power: ~$1.50/mo - net: -$0.30/mo[/#1f8033]\n"
+            f"  [bold #ccffdd]NETWORK[/bold #ccffdd] [#1f8033]({net_ghs:.1f} GH/s approx)[/#1f8033]\n"
+            f"  [#1f8033]my share[/#1f8033]    {share_str}\n\n"
+            f"  [bold #ccffdd]BREAK-EVEN[/bold #ccffdd] [#1f8033]({ESTIMATED_MINING_WATTS}W · ${POWER_COST_PER_KWH:.2f}/kWh)[/#1f8033]\n"
+            f"  [#1f8033]power cost[/#1f8033]  [#ccffdd]${daily_power_cost:.4f}[/#ccffdd]/day [#1f8033]({daily_kwh:.2f} kWh)[/#1f8033]\n"
+            f"  [#1f8033]net result[/#1f8033]  {net_str}\n\n"
+            f"  [#1f8033]reject rate: {rej_pct_str} | power: -${daily_power_cost:.4f}/day[/#1f8033]\n"
         )
         return h
 
