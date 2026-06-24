@@ -237,13 +237,19 @@ python3 miner-dashboard.py
 
 | 문서 | 내용 |
 | --- | --- |
-| [docs/getting-started.md](docs/getting-started.md) | 지갑/설정/첫 실행 (영문) |
-| [docs/dashboard.md](docs/dashboard.md) | 패널별 상세 (영문) |
-| [docs/exchanges.md](docs/exchanges.md) | 거래소 선택, XMR 주소 받기, 스캠 토큰 구분 (영문) |
-| [docs/supportxmr.md](docs/supportxmr.md) | SupportXMR 사용법 (영문) |
-| [docs/security.md](docs/security.md) | 보안 모범 사례 (영문) |
+| [docs/getting-started.ko.md](docs/getting-started.ko.md) | 지갑/설정/첫 실행 (한국어) |
+| [docs/getting-started.md](docs/getting-started.md) | 같은 내용 (영어) |
+| [docs/dashboard.ko.md](docs/dashboard.ko.md) | 패널별 상세 (한국어) |
+| [docs/dashboard.md](docs/dashboard.md) | 같은 내용 (영어) |
+| [docs/exchanges.ko.md](docs/exchanges.ko.md) | 거래소 선택, XMR 주소, 스캠 구분 (한국어) |
+| [docs/exchanges.md](docs/exchanges.md) | 같은 내용 (영어) |
+| [docs/supportxmr.ko.md](docs/supportxmr.ko.md) | SupportXMR 사용법 (한국어) |
+| [docs/supportxmr.md](docs/supportxmr.md) | 같은 내용 (영어) |
+| [docs/security.ko.md](docs/security.ko.md) | 보안 모범 사례 (한국어) |
+| [docs/security.md](docs/security.md) | 같은 내용 (영어) |
 
-> 한국어 문서는 추후 추가 예정. 핵심 내용만 메인 README에 포함.
+> 모든 문서는 한/영 모두 제공됩니다. 한국어가 더 편하시면 `.ko.md` 버전을,
+> 영어가 편하시면 원본을 사용하세요. 두 버전의 내용은 동일합니다.
 
 ## 프라이버시
 
