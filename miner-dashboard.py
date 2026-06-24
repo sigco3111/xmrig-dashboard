@@ -285,9 +285,14 @@ class HashratePanel(Static):
             filled = pct // 5
             return f"{chr(0x2588) * filled}{chr(0x2591) * (20 - filled)} {pct:3d}%"
 
+        def bar_short(v: float) -> str:
+            """Compact bar: 10 chars wide instead of 20."""
+            pct = min(100, int(v / max_hr * 100))
+            filled = pct // 10
+            return f"{chr(0x2588) * filled}{chr(0x2591) * (10 - filled)} {pct:3d}%"
+
         # Dual-line sparkline: hashrate trend (green blocks) with
         # rejected-share markers (red dots) overlaid at the same x position.
-        # Each character position is one sample.
         spark = ""
         history = list(self.app._hr_history)
         rejected_hist = list(self.app._rejected_history)
@@ -295,36 +300,52 @@ class HashratePanel(Static):
             blocks = "▁▂▃▄▅▆▇█"
             mn, mx = min(history), max(history)
             rng = max(mx - mn, 1.0)
-            # Build a list of (char, has_reject) tuples then join with markup
             chars = []
             for i, v in enumerate(history):
                 block = blocks[min(7, int((v - mn) / rng * 7))]
-                # Mark rejected share with red dot overlay
                 has_reject = i < len(rejected_hist) and rejected_hist[i] > 0
                 chars.append((block, has_reject))
-            # Use Rich markup: red '●' for reject position, green block otherwise.
-            # We layer reject marker above block by using a single char per slot.
             spark_parts = []
             for block, has_reject in chars:
                 if has_reject:
-                    # Replace block with red dot to overlay the reject position
                     spark_parts.append(f"[bold #ff3355]●[/bold #ff3355]")
                 else:
                     spark_parts.append(f"[bold #33ff66]{block}[/bold #33ff66]")
             spark = "".join(spark_parts)
 
-        # Compute reject rate for the legend
         rej_rate_pct = 0.0
         total_acc = sum(self.app._accepted_history)
         total_rej = sum(self.app._rejected_history)
         if total_acc + total_rej > 0:
             rej_rate_pct = total_rej * 100 / (total_acc + total_rej)
 
+        # Density mode
+        try:
+            screen_h = self.app.size.height
+        except Exception:
+            screen_h = 80
+        if self.app._compact_mode or screen_h < 36:
+            use_short = True
+        else:
+            use_short = False
+        b = bar_short if use_short else bar
+
+        if use_short:
+            # Compact: 5 lines, no blank lines between rows
+            return (
+                f"[bold #00ff9c] HASHRATE [/bold #00ff9c]\n"
+                f"  10s: [bold #ccffdd]{hr_10:>7,.0f}[/bold #ccffdd]  {b(hr_10)}\n"
+                f"  60s: [bold #ccffdd]{hr_60:>7,.0f}[/bold #ccffdd]  {b(hr_60)}\n"
+                f"  15m: [bold #ccffdd]{hr_15:>7,.0f}[/bold #ccffdd]  {b(hr_15)}\n"
+                f"  trend: {spark}  [dim #1f8033]r:{rej_rate_pct:.1f}%[/dim #1f8033]\n"
+            )
+
+        # Full: 7 lines
         h = (
             f"[bold #00ff9c] HASHRATE [/bold #00ff9c]\n\n"
-            f"  10s:  [bold #ccffdd]{hr_10:>8,.1f}[/bold #ccffdd] H/s   {bar(hr_10)}\n"
-            f"  60s:  [bold #ccffdd]{hr_60:>8,.1f}[/bold #ccffdd] H/s   {bar(hr_60)}\n"
-            f"  15m:  [bold #ccffdd]{hr_15:>8,.1f}[/bold #ccffdd] H/s   {bar(hr_15)}\n"
+            f"  10s:  [bold #ccffdd]{hr_10:>8,.1f}[/bold #ccffdd] H/s   {b(hr_10)}\n"
+            f"  60s:  [bold #ccffdd]{hr_60:>8,.1f}[/bold #ccffdd] H/s   {b(hr_60)}\n"
+            f"  15m:  [bold #ccffdd]{hr_15:>8,.1f}[/bold #ccffdd] H/s   {b(hr_15)}\n"
             f"  max:  [bold #ccffdd]{hr_max:>8,.1f}[/bold #ccffdd] H/s\n"
             f"\n  [{PALETTE['fg_faint']}]trend[/{PALETTE['fg_faint']}] {spark}  [dim #1f8033](60s · reject: {rej_rate_pct:.1f}%)[/dim #1f8033]\n"
         )
@@ -363,18 +384,19 @@ class SystemPanel(Static):
         power = estimate_power(cpu_pct)
         cores = psutil.cpu_count() or 1
 
-        # Compact mode: drop the bars, keep just numbers
-        if self.app._compact_mode:
-            h = (
-                f"[bold #33ff66] SYSTEM [/bold #33ff66]\n\n"
-                f"  CPU [#ccffdd]{cpu_pct:5.1f}%[/#ccffdd] {temp_str}  "
-                f"[#1f8033]Cores {cores}[/#1f8033]\n"
-                f"  RAM [#ccffdd]{mem_pct:5.1f}%[/#ccffdd]  "
-                f"[#1f8033]{mem_used:.1f}/{mem_total:.1f} GB[/#1f8033]\n"
-                f"  PWR [#ccffdd]~{power:.0f}W[/#ccffdd]  "
-                f"UPTIME [#ccffdd]{int(uptime//3600)}h {int((uptime%3600)//60)}m[/#ccffdd]\n"
+        # Density mode
+        try:
+            screen_h = self.app.size.height
+        except Exception:
+            screen_h = 80
+        if self.app._compact_mode or screen_h < 36:
+            # Compact: 5 lines
+            return (
+                f"[bold #33ff66] SYSTEM [/bold #33ff66]\n"
+                f"  CPU [#ccffdd]{cpu_pct:5.1f}%[/#ccffdd] {temp_str}  [#1f8033]Cores {cores}[/#1f8033]\n"
+                f"  RAM [#ccffdd]{mem_pct:5.1f}%[/#ccffdd]  [#1f8033]{mem_used:.1f}/{mem_total:.1f} GB[/#1f8033]\n"
+                f"  PWR [#ccffdd]~{power:.0f}W[/#ccffdd]  UPTIME [#ccffdd]{int(uptime//3600)}h {int((uptime%3600)//60)}m[/#ccffdd]\n"
             )
-            return h
 
         h = (
             f"[bold #33ff66] SYSTEM [/bold #33ff66]\n\n"
@@ -402,6 +424,17 @@ class PoolPanel(Static):
         threads_r = s.get("threads_ready", 0)
         threads_t = s.get("threads_total", 0)
         threads_pct = int(threads_r * 100 / max(threads_t, 1))
+        try:
+            screen_h = self.app.size.height
+        except Exception:
+            screen_h = 80
+        if self.app._compact_mode or screen_h < 36:
+            # Compact: 3 lines
+            return (
+                f"[bold #1f8033] POOL [/bold #1f8033]\n"
+                f"  [#ccffdd]{pool_url}[/#ccffdd] {status}\n"
+                f"  [#1f8033]block[/#1f8033] [#ccffdd]{block:,}[/#ccffdd] [#1f8033]threads[/#1f8033] [#ccffdd]{threads_r}/{threads_t}[/#ccffdd]\n"
+            )
         h = (
             f"[bold #1f8033] POOL [/bold #1f8033]\n\n"
             f"  [#1f8033]host[/#1f8033] [#ccffdd]{pool_url}[/#ccffdd]\n"
@@ -521,7 +554,7 @@ class EarningsPanel(Static):
                 f"  [bold #ccffdd]EARNINGS[/bold #ccffdd] [#1f8033](XMR: ${price:.2f})[/#1f8033] [#ccffdd]${usd_per_day:.4f}/day[/#ccffdd]\n"
                 f"  [#1f8033]net share[/#1f8033]  {share_str} [dim #1f8033]of {net_ghs:.1f}GH/s[/dim #1f8033]\n"
                 f"  [#1f8033]break-even[/#1f8033]  {net_str}\n"
-                f"  [dim #1f8033]reject rate: {rej_pct_str} | power: -${daily_power_cost:.4f}/day[/#1f8033]\n"
+                f"  [dim #1f8033]reject rate: {rej_pct_str} | power: -${daily_power_cost:.4f}/day[/dim #1f8033]\n"
             )
 
         # === FULL mode: complete forecast, ~16 lines ===
@@ -548,10 +581,16 @@ class LogPanel(Static):
     """Recent XMRig log lines — terminal-green styled."""
     def render(self) -> str:
         s = self.app.state.get("xmrig", _DEFAULT_STATE)
-        # Compact mode: fewer lines, tighter
-        max_lines = 3 if self.app._compact_mode else 8
+        try:
+            screen_h = self.app.size.height
+        except Exception:
+            screen_h = 80
+        # Fewer log lines in small windows to save space
+        if self.app._compact_mode or screen_h < 36:
+            max_lines = 3
+        else:
+            max_lines = 5
         lines = list(s.get("recent_log", []))[-max_lines:]
-        # Strip markup characters from log lines to avoid Rich markup conflicts
         formatted = []
         for ln in lines:
             ln = ln.replace("[", "(").replace("]", ")")
@@ -561,8 +600,8 @@ class LogPanel(Static):
         if not formatted:
             formatted = ["[#1f8033](waiting for log data...)[/#1f8033]"]
         h = (
-            f"[bold #0e4019] LAST LOG LINES [/bold #0e4019]\n\n"
-            + "\n".join(f"  [#1f8033]>[/#1f8033] [#33ff66]{l}[/#33ff66]" for l in formatted)
+            f"[bold #0e4019] LAST LOG LINES [/bold #0e4019]\n"
+            + "\n".join(f"  [#1f8033] [/#1f8033][#33ff66]{l}[/#33ff66]" for l in formatted)
         )
         return h
 
@@ -620,7 +659,7 @@ class MinerDashboard(App):
     }}
     HashratePanel, SystemPanel, PoolPanel, EarningsPanel, LogPanel {{
         border: solid {PALETTE['fg_dim']};
-        padding: 1 2;
+        padding: 0 2;
         background: {PALETTE['bg']};
     }}
     /* All panel borders in cyberpunk green; brightness varies by role */
