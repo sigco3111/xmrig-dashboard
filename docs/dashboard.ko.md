@@ -198,22 +198,47 @@
 
 | 변수 (코드) | 소스                                  |
 | ----------- | ------------------------------------- |
-| `WALLET`    | `~/.xmrig/xmrig-config.json`(또는 `$XMRIG_CONFIG`)의 `pools[0].user` |
+| `WALLET`    | `xmrig-config.json`(또는 `$XMRIG_CONFIG`)의 `pools[0].user` |
 | `WORKER`    | 같은 파일의 `pools[0].pass`           |
 
 설정 파일이 없으면 대시보드는 placeholder 텍스트를 사용하고 시작 시 경고:
 
 ```
   WARNING: XMRig config not found at /Users/you/.xmrig/xmrig-config.json
-    Set XMRIG_CONFIG env var to the correct path.
+    Tried: ['/Users/you/.xmrig/xmrig-config.json', '/Users/you/xmrig-config.json']
+    Set XMRIG_CONFIG env var to the correct path,
+    or symlink your config into one of the above locations.
 ```
 
 ### 2. 환경변수 (경로용)
 
-| 변수          | 기본값                                |
-| ------------- | ------------------------------------- |
-| `XMRIG_LOG`   | `~/.xmrig/xmrig.log`                  |
-| `XMRIG_CONFIG`| `~/.xmrig/xmrig-config.json`          |
+| 변수          | 기본값 (fallback 포함)                                 |
+| ------------- | ------------------------------------------------------ |
+| `XMRIG_LOG`   | env var → `~/.xmrig/xmrig.log` → `~/xmrig.log` → `/tmp/xmrig.log` |
+| `XMRIG_CONFIG`| env var → `~/.xmrig/xmrig-config.json` → `~/xmrig-config.json`     |
+
+**경로 해결 순서** (존재하는 첫 번째 항목 사용):
+
+```
+  1. XMRIG_LOG / XMRIG_CONFIG 환경변수 값 (설정된 경우)
+  2. ~/.xmrig/xmrig.log (또는 xmrig-config.json)   ← 권장
+  3. ~/xmrig.log       (또는 xmrig-config.json)    ← 흔한 기본값
+  4. /tmp/xmrig.log                             ← 최후의 fallback
+```
+
+어떤 후보도 존재하지 않으면 대시보드는 여전히 시작해요 (크래시 안 함),
+하지만 로그 파일이 나타날 때까지 XMRig 관련 패널은 비어있어요.
+`XMRIG_LOG`를 명시적으로 설정해서 올바른 위치를 가리키세요.
+
+해결된 경로는 시작 시 출력돼요:
+
+```
+  XMRig log:        /Users/you/xmrig.log  [OK]
+  XMRig config:     /Users/you/xmrig-config.json  [OK]
+```
+
+`[OK]` / `[NOT FOUND]` 표시가 대시보드가 올바른 파일에 연결됐는지
+즉시 알려줘요.
 
 ### 3. 명령행 (없음)
 
@@ -295,22 +320,39 @@ sanity check로는 충분해요.
 
 ### 시작 시 "XMRig log not found"
 
-XMRig이 아직 시작 안 됨, 또는 다른 파일에 로깅 중. 다음 중 하나:
-- 먼저 XMRig 시작, 또는
-- `XMRIG_LOG=/path/to/your/log` 설정.
+시작 출력에서 `XMRig log:` 옆에 `[NOT FOUND]`가 보이면, 대시보드는
+시작했지만 XMRig 로그 파일을 찾을 수 없어요. HASHRATE, POOL, MINING
+STATS, LAST LOG LINES 패널은 비어있게 됩니다.
+
+**해결 방법** 중 하나:
+
+1. **XMRig이 아직 안 돌고 있으면 먼저 시작** — XMRig이 로그 파일에
+   쓰기 시작하면 파일이 나타나요.
+2. **`XMRIG_LOG`를 명시적으로 설정**:
+   ```bash
+   export XMRIG_LOG=/path/to/your/xmrig.log
+   ~/bin/run-miner-dashboard.sh
+   ```
+3. **심볼릭 링크**로 표준 위치 중 하나에 연결:
+   ```bash
+   mkdir -p ~/.xmrig
+   ln -sf /path/to/your/xmrig.log ~/.xmrig/xmrig.log
+   ```
+4. 로그를 옮긴 후 **대시보드 재시작**해서 경로 해결을 다시 실행.
+
+시작 출력에 시도한 모든 후보 경로가 나열돼요 — 그걸 보고 어떤 경로가
+우리 환경에 맞는지 확인하세요.
 
 ### XMRig이 도는데 대시보드가 `IDLE` 표시
 
-로그 파서가 아직 `new job from <pool>` 라인을 못 본 거예요. 로그
-파일이 새 파일이고 XMRig이 초기화 중일 때 발생. 5-10초 대기;
-패널이 자동으로 `MINING`으로 전환.
-
-### Hashrate가 0 H/s
-
 가능한 원인:
 1. XMRig이 일시정지됨 (`p` 키 또는 수동으로 SIGSTOP). `r`로 재개.
-2. 로그 파일이 비어있음 — XMRig이 다른 경로에 로깅 중. `XMRIG_LOG` 확인.
-3. 채굴기가 대시보드가 파싱하는 것과 다른 풀에 연결. 둘 다 작동하지만, POOL 패널의 URL은 XMRig이 실제로 사용한 것을 반영.
+2. 로그 파일이 비어있음 — XMRig이 다른 경로에 로깅 중. 시작 출력의
+   `XMRig log:` 옆에 `[NOT FOUND]`가 있는지 확인.
+3. 로그 파일은 파싱되지만 아직 `miner speed` 라인을 포함할 만큼 길지
+   않음. XMRig 시작 후 10~15초 대기.
+4. 채굴기가 대시보드가 파싱하는 것과 다른 풀에 연결. 둘 다 작동하지만,
+   POOL 패널의 URL은 XMRig이 실제로 사용한 것을 반영.
 
 ### 깨진 유니코드
 

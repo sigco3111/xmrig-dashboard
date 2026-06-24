@@ -204,7 +204,7 @@ come from:
 
 | Variable (in code) | Source                                  |
 | ------------------ | --------------------------------------- |
-| `WALLET`           | `pools[0].user` in `~/.xmrig/xmrig-config.json` (or `$XMRIG_CONFIG`) |
+| `WALLET`           | `pools[0].user` in `xmrig-config.json` (or `$XMRIG_CONFIG`) |
 | `WORKER`           | `pools[0].pass` in the same file        |
 
 If the config file is missing, the dashboard uses placeholder
@@ -212,15 +212,40 @@ text and a warning on startup:
 
 ```
   WARNING: XMRig config not found at /Users/you/.xmrig/xmrig-config.json
-    Set XMRIG_CONFIG env var to the correct path.
+    Tried: ['/Users/you/.xmrig/xmrig-config.json', '/Users/you/xmrig-config.json']
+    Set XMRIG_CONFIG env var to the correct path,
+    or symlink your config into one of the above locations.
 ```
 
 ### 2. Environment variables (for paths)
 
-| Variable       | Default                              |
-| -------------- | ------------------------------------ |
-| `XMRIG_LOG`    | `~/.xmrig/xmrig.log`                 |
-| `XMRIG_CONFIG` | `~/.xmrig/xmrig-config.json`         |
+| Variable       | Default (with fallback)                  |
+| -------------- | ---------------------------------------- |
+| `XMRIG_LOG`    | env var → `~/.xmrig/xmrig.log` → `~/xmrig.log` → `/tmp/xmrig.log` |
+| `XMRIG_CONFIG` | env var → `~/.xmrig/xmrig-config.json` → `~/xmrig-config.json`     |
+
+**Path resolution order** (first one that exists wins):
+
+```
+  1. The value of the XMRIG_LOG / XMRIG_CONFIG env var (if set)
+  2. ~/.xmrig/xmrig.log (or xmrig-config.json)   ← recommended
+  3. ~/xmrig.log       (or xmrig-config.json)    ← common default
+  4. /tmp/xmrig.log                             ← last-resort fallback
+```
+
+If none of the candidates exist, the dashboard still starts (no
+crash), but XMRig-related panels stay empty until the log file
+appears. Set `XMRIG_LOG` explicitly to point at the right place.
+
+The resolved paths are printed at startup:
+
+```
+  XMRig log:        /Users/you/xmrig.log  [OK]
+  XMRig config:     /Users/you/xmrig-config.json  [OK]
+```
+
+The `[OK]` / `[NOT FOUND]` indicator tells you immediately
+whether the dashboard is wired to the right files.
 
 ### 3. Command-line (none)
 
@@ -308,10 +333,30 @@ Either:
 
 ### "XMRig log not found" on startup
 
-XMRig has not been started yet, or is logging to a different
-file. Either:
-- Start XMRig first, or
-- Set `XMRIG_LOG=/path/to/your/log` to point at the right file.
+When you see `[NOT FOUND]` next to `XMRig log:` in the startup
+output, the dashboard started but cannot find your XMRig log
+file. The HASHRATE, POOL, MINING STATS, and LAST LOG LINES
+panels will stay empty.
+
+**To fix**, do one of:
+
+1. **Start XMRig first** if it isn't running yet — the log file
+   appears once XMRig writes to it.
+2. **Set `XMRIG_LOG` explicitly** to point at the right file:
+   ```bash
+   export XMRIG_LOG=/path/to/your/xmrig.log
+   ~/bin/run-miner-dashboard.sh
+   ```
+3. **Symlink** the log into one of the standard locations:
+   ```bash
+   mkdir -p ~/.xmrig
+   ln -sf /path/to/your/xmrig.log ~/.xmrig/xmrig.log
+   ```
+4. **Restart the dashboard** to re-run the path resolution after
+   moving the log.
+
+The startup output lists all candidate paths that were tried —
+use that to figure out which one matches your setup.
 
 ### Dashboard shows `IDLE` even though XMRig is running
 
@@ -323,8 +368,9 @@ Wait 5-10 seconds; the panel will switch to `MINING` automatically.
 
 Possible causes:
 1. XMRig is paused (sent `SIGSTOP` from `p` key or manually). Resume with `r`.
-2. The log file is empty because XMRig writes to a different path. Check `XMRIG_LOG`.
-3. The miner is connected to a different pool than the dashboard parses. Both should still work, but the URL in the POOL panel will reflect whatever XMRig actually used.
+2. The log file is empty because XMRig writes to a different path. Check the startup output for `[NOT FOUND]` next to `XMRig log:`.
+3. The log file is being parsed but is too short to contain a `miner speed` line yet. Wait 10-15 seconds after XMRig starts.
+4. The miner is connected to a different pool than the dashboard parses. Both should still work, but the URL in the POOL panel will reflect whatever XMRig actually used.
 
 ### Garbled Unicode
 
