@@ -3,6 +3,11 @@
 > A reference for every panel, key, and configuration knob in
 > `miner-dashboard.py`.
 
+The dashboard uses an **NMMiner-style cyberpunk green** color
+theme: deep terminal-green background (`#001100`) with bright
+green text (`#33ff66`) and accent highlights (`#00ff9c`). All
+panels share the same visual language.
+
 ---
 
 ## What you see at a glance
@@ -25,8 +30,14 @@ The dashboard is a 2-column, 3-row grid:
 A status bar runs along the top:
 
 ```
-  [*] MINING  |  Worker: mac-mini  |  CPU: 89.5%  |  Hash: 1,189 H/s  |  Shares: 142 ok / 0 bad  |  09:18:42
+  >>> MINING <<<  |  heejeong_kucoin_macmini  |  CPU 100.0%  |  1,096 H/s  |  shares 76 ok / 0 bad  |  mode FULL  |  10:42:18
 ```
+
+The status bar uses different colors for each segment:
+- **`>>> MINING <<<`** in bright accent green when connected, amber when idle
+- **CPU/Hash/Shares** numbers in near-white (`#ccffdd`) for legibility
+- **Rejected shares** turn red when > 0, dim when 0
+- **`mode FULL`** / **`mode COMPACT`** shows the current density
 
 ---
 
@@ -41,6 +52,8 @@ A status bar runs along the top:
    60s:  1,173.6 H/s   ##########░░░░░  78%
    15m:  1,180.0 H/s   ##########░░░░░  78%
    max:  1,320.9 H/s
+
+  trend ▂▃▅▆▇▆▅▆▇█▇▆▅▆▇█▆▆▇▆▅▆▇▆▆▇█  (60s)
 ```
 
 | Field   | Source                                          | Meaning                                                |
@@ -49,9 +62,23 @@ A status bar runs along the top:
 | `60s`   | XMRig's 60-second sliding window                | Smoother; good "what am I really getting" number        |
 | `15m`   | XMRig's 15-minute sliding window                | Hourly/daily average; reflects sustained performance   |
 | `max`   | Highest hashrate seen since miner started       | Sanity check; if current ≈ max, system is happy        |
+| `trend` | Last 60 samples of `10s` hashrate (30s @ 2Hz)   | Sparkline; visualizes fluctuation, peaks, dips         |
 
 The progress bars compare against `max(10s, 60s, 1500)`, so a
 perfectly running miner fills the bar most of the way.
+
+The **sparkline** uses Unicode block characters
+`▁▂▃▄▅▆▇█` (lowest to highest), one character per sample.
+The vertical extent is auto-scaled to the min/max of the
+window, so you can spot a sudden hashrate drop or spike at
+a glance — even if the absolute numbers haven't changed
+much.
+
+The HASHRATE border **pulses** (border color alternates
+between accent green and near-white) when the miner is
+actively connected to a pool. The pulse is driven by the
+2Hz refresh cycle, not CSS animation (Textual 6.x doesn't
+support `animation` CSS property).
 
 ### SYSTEM (top-right)
 
@@ -72,7 +99,7 @@ perfectly running miner fills the bar most of the way.
 | -------------- | ------------------- | -------------------------------------- |
 | CPU cores/threads | `psutil.cpu_count` | Auto-detected                          |
 | CPU load       | `psutil.cpu_percent` | 0-100% across all cores               |
-| CPU temperature| `psutil.sensors_temperatures` | Often `n/a` on Apple Silicon |
+| CPU temperature| `psutil.sensors_temperatures` | Color-coded: green < 70°C, amber 70-85°C, red ≥ 85°C. Often `n/a` on Apple Silicon. |
 | RAM used/total | `psutil.virtual_memory` | Includes everything, not just miner |
 | Power estimate | Heuristic            | 12W idle + 35W when mining (rough)    |
 | Uptime         | `psutil.boot_time`   | Since last system reboot, not since miner started |
@@ -176,6 +203,9 @@ across the room:
 | --- | ------------------ | --------------------------------------------------------- |
 | `p` | **Pause** mining   | Sends `SIGSTOP` to XMRig. Process keeps running, just stops hashing. CPU drops to 0%. |
 | `r` | **Resume** mining  | Sends `SIGCONT` to XMRig. Hashing resumes.                |
+| `c` | **Compact** mode   | Toggle between FULL and COMPACT density. Drops bars, fewer log lines, tighter layout. |
+| `s` | **Save** snapshot  | Writes current state to `~/.xmrig/snapshots/snapshot-YYYYMMDD-HHMMSS.json` (json). |
+| `?` | **Help**           | Opens a modal listing all keybindings. `Esc` or `q` to close. |
 | `q` | **Quit** dashboard | Closes the TUI. Does NOT stop XMRig (it keeps mining in the background). |
 
 > **SIGSTOP vs SIGTERM:** the pause key uses `SIGSTOP`, which is
@@ -183,11 +213,43 @@ across the room:
 > using 0% CPU. Use `r` to resume. If you want to actually kill
 > the miner, use `pkill xmrig` outside the dashboard.
 
+### Compact mode
+
+Pressing `c` toggles between two densities:
+
+| Mode   | What changes                                              |
+| ------ | --------------------------------------------------------- |
+| FULL   | All bars, all log lines, full forecast breakdown (default) |
+| COMPACT | Drops CPU/RAM progress bars, reduces log lines from 8 → 3, collapses the daily/monthly/yearly earnings into a single line, drops system load average. Useful for small terminal windows or when you want more info per screen. |
+
+The current mode is shown in the status bar (`mode FULL` or
+`mode COMPACT`). Press `c` again to switch back.
+
+### Snapshot
+
+Pressing `s` writes a JSON file capturing the current XMRig
+state, system metrics, and the hashrate sparkline history. The
+file goes to `~/.xmrig/snapshots/` with a timestamped name.
+
+```json
+{
+  "timestamp": "20260624-104218",
+  "xmrig": {"hashrate_10s": 1096.0, "accepted": 76, ...},
+  "system": {"cpu_pct": 100.0, "mem_pct": 47.5, ...},
+  "earnings": {"xmr_price": 318.0},
+  "hr_history": [1180.0, 1175.3, ...]
+}
+```
+
+Useful for comparing runs, debugging regressions, or just
+keeping a record of "how the system was at time X".
+
 ### What does NOT have a key
 
 - No way to change the wallet/worker from the TUI (edit the config file and restart XMRig)
 - No way to switch pools (same as above)
-- No scrolling through log history (only the last 8 lines are kept)
+- No scrolling through log history (only the last 3-8 lines are kept)
+- No way to change XMRig's CPU thread count
 
 These are intentional — the TUI is read-only by design, so
 nothing you do in the dashboard can accidentally change your
@@ -277,20 +339,59 @@ sensible default.
 
 ### Color scheme
 
-The colors are defined in the `CSS` class variable near the bottom
-of `miner-dashboard.py`. Change them to taste:
+All colors are defined in the `PALETTE` dict near the top of
+`miner-dashboard.py`. Tweak in one place and every panel
+updates.
 
 ```python
-HashratePanel { border: solid cyan; }     # change to: green, magenta, etc.
-SystemPanel   { border: solid magenta; }
-PoolPanel     { border: solid yellow; }
-EarningsPanel { border: solid green; }
-LogPanel      { border: solid white; }
+PALETTE = {
+    "bg":          "#001100",  # deep terminal green-black
+    "bg_dark":     "#000800",  # status bar background
+    "fg":          "#33ff66",  # primary text
+    "fg_dim":      "#1f8033",  # dim text
+    "fg_faint":    "#0e4019",  # very dim
+    "accent":      "#00ff9c",  # bright accent
+    "warning":     "#ffaa00",  # amber
+    "error":       "#ff3355",  # red
+    "highlight":   "#ccffdd",  # near-white
+}
 ```
 
-Background, padding, and other CSS properties are in the same
-block. See the [Textual CSS docs](https://textual.textualize.io/styles/)
-for the full vocabulary.
+The palette is used both in CSS (panel borders) and in Rich
+markup (text colors). The visual hierarchy:
+
+- **Bright green** (`accent`) — active/mining state, ">>> MINING <<<"
+- **Standard green** (`fg`) — primary text, numbers
+- **Near-white** (`highlight`) — current values, sparkline
+- **Dim green** (`fg_dim`) — labels, separator pipes
+- **Very dim** (`fg_faint`) — axis labels, background hints
+- **Amber** (`warning`) — idle state, mid temperature, 1-5% reject
+- **Red** (`error`) — high temperature, >5% reject, errors
+
+### Panel border colors
+
+Panel borders use a tiered scheme so you can see what role
+each panel plays at a glance:
+
+| Panel        | Border color  | Why                                  |
+| ------------ | ------------- | ------------------------------------ |
+| HASHRATE     | bright accent | Most important; pulses when mining  |
+| SYSTEM       | standard      | Solid reference                      |
+| POOL         | dim           | Quiet when connected                 |
+| MINING STATS | standard      | Solid reference                      |
+| LOG LINES    | very dim      | Background context                   |
+
+### Sparkline length
+
+The HASHRATE sparkline keeps the last 60 samples (30s at 2Hz).
+Change `SPARKLINE_SAMPLES` at the top of `miner-dashboard.py`:
+
+```python
+SPARKLINE_SAMPLES = 60  # 30s at 2Hz; 120 = 1 minute; 30 = 15s
+```
+
+Longer values = smoother curve but slower visual response.
+Shorter = more responsive but noisier.
 
 ### Panel layout
 
