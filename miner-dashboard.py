@@ -319,12 +319,12 @@ class HashratePanel(Static):
         if total_acc + total_rej > 0:
             rej_rate_pct = total_rej * 100 / (total_acc + total_rej)
 
-        # Density mode
+        # Density mode - very aggressive: compact if compact_mode OR screen small
         try:
             screen_h = self.app.size.height
         except Exception:
             screen_h = 80
-        if self.app._compact_mode or screen_h < 36:
+        if self.app._compact_mode or screen_h < 100:
             use_short = True
         else:
             use_short = False
@@ -533,10 +533,10 @@ class EarningsPanel(Static):
         else:
             mode = "full"
 
-        # === TINY mode: absolute essentials, 6 lines ===
-        if mode == "tiny":
+        if self.app._compact_mode or screen_h < 100:
+            # Compact: 6 lines
             return (
-                f"[bold #33ff66] MINING STATS [/bold #33ff66]\n\n"
+                f"[bold #33ff66] MINING STATS [/bold #33ff66]\n"
                 f"  [#1f8033]shares[/#1f8033] [#ccffdd]{accepted}[/#ccffdd] ok / [bold #ff3355]{rejected}[/bold #ff3355] bad\n"
                 f"  [#1f8033]session[/#1f8033] [#ccffdd]{session_h}h{session_m:02d}m[/#ccffdd] [#1f8033]({sess_per_hour:.1f}/h)[/#1f8033]\n"
                 f"  [#1f8033]est/day[/#1f8033] [#ccffdd]${usd_per_day:.4f}[/#ccffdd] [#1f8033]@ ${price:.2f}[/#1f8033]\n"
