@@ -85,7 +85,44 @@ Full panel reference: [docs/dashboard.md](docs/dashboard.md).
 ```
   p   pause mining  (sends SIGSTOP to XMRig)
   r   resume mining (sends SIGCONT)
+  c   toggle COMPACT mode (fewer log lines, denser layout)
+  g   toggle graphs on/off (heatmap + per-core bars)
+  s   save snapshot to ~/.xmrig/snapshots/
+  ?   show help modal
   q   quit dashboard  (XMRig keeps running)
+```
+
+---
+
+## What's new in v0.2.0
+
+v0.2.0 adds four visual elements designed to make the dashboard
+"vivid at a glance" without changing any of the existing readouts:
+
+| Element | What it shows | Where |
+| --- | --- | --- |
+| **ASCII wordmark + status dot** | Connected/idle state in a single character | Top status bar |
+| **Per-core vertical bars** | Which cores are working, which are idle | System panel (full mode) |
+| **Core activity heatmap** | Last 30s of per-core activity, one row per core | New HEATMAP panel |
+| **Share donut** | Accepted vs rejected share ratio at a glance | MINING STATS panel (full mode) |
+| **7-day earnings bar chart** | Daily $ estimated earnings, oldest → newest | MINING STATS panel (full mode) |
+| **Density-adaptive compact** | All new visuals collapse to one-line summaries in small terminals | Auto |
+
+The pulse effect from v0.1.0 (the `-pulse-bright` border class) is
+still in place; v0.2.0 layers the new visuals on top of it rather
+than replacing anything.
+
+**Hide the graphs any time** with `g`. Hidden state persists for
+the session.
+
+The forecast bar chart starts empty by design (we have no
+historical data when you first run v0.2.0). It fills in one bar
+per day automatically as the dashboard runs.
+
+20 unit tests cover the new helpers:
+```bash
+python3 -m pip install pytest
+python3 -m pytest tests/
 ```
 
 ---

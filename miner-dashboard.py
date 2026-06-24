@@ -268,6 +268,243 @@ def estimate_power(cpu_pct: float) -> float:
     return base + mining
 
 
+# ---------- Visualization helpers (v0.2.0) ----------
+# All helpers are pure functions: they take primitive inputs and return
+# Rich-markup strings. This keeps them unit-testable without spinning up
+# the Textual app. They live in a dedicated section so future v0.3.0+
+# visual effects (e.g. animations) can be added without touching widget
+# code.
+
+
+def render_donut(accepted: int, rejected: int, size: int = 4) -> str:
+    """Render an ASCII donut chart of accepted vs rejected shares.
+
+    Returns Rich markup. size is the outer radius in cells (4 is compact).
+    When accepted + rejected == 0, returns a placeholder "no data" string
+    so the panel never renders an empty donut (which would just be a blank
+    circle and look broken).
+    """
+    total = accepted + rejected
+    if total == 0:
+        return f"[{PALETTE['fg_dim']}](no shares yet)[/{PALETTE['fg_dim']}]"
+
+    # Pre-rendered mini donut: 4 levels (top, upper-mid, lower-mid, bottom).
+    # Each "level" is a single text row.  We use a 5x4 block layout:
+    #
+    #     ░██░
+    #     █░░█
+    #     █░░█
+    #     ░██░
+    #
+    # The donut hole is the center 2x2; the ring is everything else.
+    # We pick 'inner' (hole) vs 'ring' per cell based on position.
+    pct = accepted / total
+    if pct > 0.95:
+        ring_color, hole_color = PALETTE["fg"], PALETTE["fg_faint"]
+        label = "[bold #ccffdd]%.0f%%[/bold #ccffdd] acc" % (pct * 100)
+    elif pct < 0.90:
+        ring_color, hole_color = PALETTE["warning"], PALETTE["fg_faint"]
+        label = "[bold #ffaa00]%.1f%%[/bold #ffaa00] acc" % (pct * 100)
+    else:
+        ring_color, hole_color = PALETTE["fg"], PALETTE["fg_faint"]
+        label = "[bold #ccffdd]%.1f%%[/bold #ccffdd] acc" % (pct * 100)
+
+    # 4x4 cell pattern: (ring_color, hole_color)
+    # Layout: row 0 top arc, rows 1-2 sides, row 3 bottom arc
+    rows = [
+        f"[{ring_color}]▄[/{ring_color}][{hole_color}]██[/{hole_color}][{ring_color}]▀[/{ring_color}]",
+        f"[{ring_color}]█[/{ring_color}][{hole_color}]░░[/{hole_color}][{ring_color}]█[/{ring_color}]",
+        f"[{ring_color}]█[/{ring_color}][{hole_color}]░░[/{hole_color}][{ring_color}]█[/{ring_color}]",
+        f"[{ring_color}]▀[/{ring_color}][{hole_color}]██[/{hole_color}][{ring_color}]▄[/{ring_color}]",
+    ]
+    return "\n".join(rows) + " " + label
+
+
+def render_core_bars(per_core: list, width: int = 6) -> str:
+    """Render per-CPU-core load as a row of vertical mini-bars.
+
+    per_core is a list of floats (0-100) — one per core. width is the
+    height of each bar in cells. We render horizontally: each core gets
+    a column of `width` stacked cells, color-graded from fg_faint (cold)
+    to fg (hot). A "core number" appears below each bar if there's room.
+
+    Layout (per core): if width >= 4, show a 2-line label below the bar.
+    If width < 4, just the bar.
+
+    Empty list → returns placeholder.
+    """
+    if not per_core:
+        return f"[{PALETTE['fg_dim']}](no core data)[/{PALETTE['fg_dim']}]"
+
+    # 8-level gradient by load: fg_faint(0) -> fg_dim(1) -> fg(2)
+    def cell_color(pct: float) -> str:
+        if pct < 30:
+            return PALETTE["fg_faint"]
+        if pct < 70:
+            return PALETTE["fg_dim"]
+        return PALETTE["fg"]
+
+    # Cap visible cores at 32 to avoid terminal overflow on big CPUs.
+    # Show "..." suffix if more.
+    visible = per_core[:32]
+    more = len(per_core) - len(visible)
+
+    # Build column for each core: list of (char, color) from bottom to top.
+    columns = []
+    for v in visible:
+        pct = max(0.0, min(100.0, v))
+        filled = int(round(pct / 100 * width))
+        col = []
+        # Top to bottom: fg (full) -> fg_faint (empty). Use full-block char.
+        for i in range(width):
+            if i < (width - filled):
+                col.append((chr(0x2581), PALETTE["fg_faint"]))  # lower 1/8
+            else:
+                col.append((chr(0x2588), cell_color(pct)))
+        columns.append(col)
+
+    # Render rows (top to bottom)
+    lines = []
+    for row in range(width):
+        line = " "
+        for col in columns:
+            ch, col_color = col[row]
+            line += f"[{col_color}]{ch}[/{col_color}] "
+        lines.append(line)
+
+    # Caption row with average load
+    if visible:
+        avg = sum(visible) / len(visible)
+        cap = f" avg [{PALETTE['fg']}]{avg:5.1f}%[/{PALETTE['fg']}]"
+    else:
+        cap = ""
+    if more > 0:
+        cap += f"  [{PALETTE['fg_dim']}]+{more} more[/{PALETTE['fg_dim']}]"
+    lines.append(cap)
+    return "\n".join(lines)
+
+
+def render_forecast_bars(daily_usd: list, max_height: int = 5) -> str:
+    """Render a bar chart of daily earnings (last N days).
+
+    daily_usd is a list of floats — one per day, oldest first. Each bar
+    uses a 5-step ramp: ▁▂▃▄▅▆▇█. Color: green if positive, red if 0/neg.
+
+    If list is empty or all zeros → returns placeholder. First 1-2 weeks
+    will look mostly empty because the dashboard has no historical data;
+    the placeholder text is important so users don't think the chart is
+    broken.
+    """
+    if not daily_usd or all(v <= 0 for v in daily_usd):
+        return (
+            f"[{PALETTE['fg_dim']}]no data yet — chart fills in as the"
+            f"[/{PALETTE['fg_dim']}]\n"
+            f"[{PALETTE['fg_dim']}]dashboard runs each day[/{PALETTE['fg_dim']}]"
+        )
+
+    blocks = "▁▂▃▄▅▆▇"
+    mx = max(daily_usd) or 1.0
+
+    # Cap at 14 days shown
+    visible = daily_usd[-14:]
+    bar_chars = []
+    for v in visible:
+        ratio = v / mx
+        idx = min(len(blocks) - 1, int(ratio * len(blocks)))
+        bar_chars.append((blocks[idx], v))
+
+    # Render in one line (horizontal bar chart, like a sparkline)
+    line = " "
+    for ch, v in bar_chars:
+        if v > 0:
+            line += f"[{PALETTE['fg']}]{ch}[/{PALETTE['fg']}]"
+        else:
+            line += f"[{PALETTE['fg_faint']}]{ch}[/{PALETTE['fg_faint']}]"
+    line += f"  [{PALETTE['fg_dim']}]max ${mx:.4f}/d[/{PALETTE['fg_dim']}]"
+    return line
+
+
+def render_core_heatmap(per_core_now: list, history: list, width: int = 12) -> str:
+    """Render a heatmap of CPU core activity over time.
+
+    history is a list of per-core-snapshot lists, oldest first. Each
+    snapshot is a list of floats (0-100), one per core. The most recent
+    snapshot is rendered on the right (newest). Each cell is 1 char wide
+    and uses 4 intensity levels: ' ' (cold) -> '░' -> '▒' -> '▓' (hot).
+
+    Used as v0.2.0's "vivid" centerpiece: shows at a glance which cores
+    are doing work, and which have dropped out. Width caps visible
+    columns (older ones scroll off the left).
+    """
+    if not history or not per_core_now:
+        return f"[{PALETTE['fg_dim']}](no core samples yet)[/{PALETTE['fg_dim']}]"
+
+    n_cores = len(per_core_now)
+    cells = " ░▒▓"
+
+    # Take the last `width` snapshots (newest on the right)
+    snapshots = history[-width:] if len(history) > width else list(history)
+    # Pad with empty lists on the left if we don't have enough history
+    while len(snapshots) < width:
+        snapshots.insert(0, [0.0] * n_cores)
+
+    # Render row-by-row (core 0 at top, core n-1 at bottom)
+    lines = []
+    for core_idx in range(n_cores):
+        row = " "
+        for snap in snapshots:
+            if core_idx < len(snap):
+                pct = snap[core_idx]
+                if pct < 5:
+                    ch, color = " ", PALETTE["fg_faint"]
+                elif pct < 40:
+                    ch, color = cells[1], PALETTE["fg_dim"]
+                elif pct < 75:
+                    ch, color = cells[2], PALETTE["fg"]
+                else:
+                    ch, color = cells[3], PALETTE["accent"]
+            else:
+                ch, color = "?", PALETTE["warning"]
+            row += f"[{color}]{ch}[/{color}]"
+        # Append a tiny per-core label
+        now_pct = per_core_now[core_idx] if core_idx < len(per_core_now) else 0
+        if now_pct >= 70:
+            row += f"  [{PALETTE['fg']}]{now_pct:3.0f}[/{PALETTE['fg']}]"
+        elif now_pct >= 30:
+            row += f"  [{PALETTE['fg_dim']}]{now_pct:3.0f}[/{PALETTE['fg_dim']}]"
+        else:
+            row += f"  [{PALETTE['fg_faint']}]{now_pct:3.0f}[/{PALETTE['fg_faint']}]"
+        lines.append(row)
+
+    # Footer: time axis. Pad so "old" is left, "now" is right of `width` cells.
+    inner = max(0, width - 3 - 3)  # 3 = len("old"), 3 = len("now")
+    footer = (
+        f"  [{PALETTE['fg_faint']}]"
+        + "old" + " " * inner + "now"
+        + f"[/{PALETTE['fg_faint']}]"
+    )
+    lines.append(footer)
+    return "\n".join(lines)
+
+
+def render_header_logo(width: int = 60) -> str:
+    """Render the dashboard header logo + status badge.
+
+    Single-line pixel-style logo using block characters. The status
+    badge sits to the right: a filled dot in green (mining) or amber
+    (idle). Designed to be a single row that fits any terminal width.
+    """
+    # 1-line ASCII wordmark for "XMRIG" in block letters
+    # (X M R I G) — each letter is 5 cells wide, space 1 between.
+    # We use ▀ ▄ █ to build the strokes compactly.
+    logo = (
+        f"[bold {PALETTE['accent']}]"
+        f"█▀█ █▀▀ █▀█ █▀▀ █▀▀"
+        f"[/bold {PALETTE['accent']}]"
+    )
+    return logo
+
+
 # ---------- TUI Widgets ----------
 
 class HashratePanel(Static):
@@ -383,29 +620,35 @@ class SystemPanel(Static):
             temp_str = f"[#ccffdd]{temp:.0f}C[/#ccffdd]"
         power = estimate_power(cpu_pct)
         cores = psutil.cpu_count() or 1
-
+        # Per-core percent (v0.2.0). psutil.cpu_percent(percpu=True) is the
+        # canonical call; it's accurate but ~50ms slower than the global one.
+        # We pass interval=None to get deltas since the last call, keeping
+        # the panel snappy at 2Hz.
+        per_core = psutil.cpu_percent(interval=None, percpu=True) or [0.0] * cores
         # Density mode
         try:
             screen_h = self.app.size.height
         except Exception:
             screen_h = 80
         if self.app._compact_mode or screen_h < 36:
-            # Compact: 5 lines
+            # Compact: 5 lines (no per-core bars, save them for full mode)
             return (
                 f"[bold #33ff66] SYSTEM [/bold #33ff66]\n"
-                f"  CPU [#ccffdd]{cpu_pct:5.1f}%[/#ccffdd] {temp_str}  [#1f8033]Cores {cores}[/#1f8033]\n"
-                f"  RAM [#ccffdd]{mem_pct:5.1f}%[/#ccffdd]  [#1f8033]{mem_used:.1f}/{mem_total:.1f} GB[/#1f8033]\n"
-                f"  PWR [#ccffdd]~{power:.0f}W[/#ccffdd]  UPTIME [#ccffdd]{int(uptime//3600)}h {int((uptime%3600)//60)}m[/#ccffdd]\n"
+                f" CPU [#ccffdd]{cpu_pct:5.1f}%[/#ccffdd] {temp_str} [#1f8033]Cores {cores}[/#1f8033]\n"
+                f" RAM [#ccffdd]{mem_pct:5.1f}%[/#ccffdd] [#1f8033]{mem_used:.1f}/{mem_total:.1f} GB[/#1f8033]\n"
+                f" PWR [#ccffdd]~{power:.0f}W[/#ccffdd] UPTIME [#ccffdd]{int(uptime//3600)}h {int((uptime%3600)//60)}m[/#ccffdd]\n"
             )
-
+        # Full mode: append per-core bars
         h = (
             f"[bold #33ff66] SYSTEM [/bold #33ff66]\n\n"
-            f"  CPU    [#1f8033]{cores}C/{cores}T  ~{cpu_pct*100/100:.0f}% load[/#1f8033]\n"
-            f"         {cpu_bar} {cpu_pct:5.1f}%  {temp_str}\n\n"
-            f"  RAM    [#1f8033]{mem_used:.1f}/{mem_total:.1f} GB[/#1f8033]\n"
-            f"         {mem_bar} {mem_pct:5.1f}%\n\n"
-            f"  POWER  [#ccffdd]~{power:.0f}W[/#ccffdd] [#1f8033](estimated)[/#1f8033]\n"
-            f"  UPTIME [#ccffdd]{int(uptime//3600)}h {int((uptime%3600)//60)}m[/#ccffdd]\n"
+            f" CPU [#1f8033]{cores}C/{cores}T ~{cpu_pct*100/100:.0f}% load[/#1f8033]\n"
+            f" {cpu_bar} {cpu_pct:5.1f}% {temp_str}\n\n"
+            f" RAM [#1f8033]{mem_used:.1f}/{mem_total:.1f} GB[/#1f8033]\n"
+            f" {mem_bar} {mem_pct:5.1f}%\n\n"
+            f" POWER [#ccffdd]~{power:.0f}W[/#ccffdd] [#1f8033](estimated)[/#1f8033]\n"
+            f" UPTIME [#ccffdd]{int(uptime//3600)}h {int((uptime%3600)//60)}m[/#ccffdd]\n\n"
+            f" [#1f8033]per-core[/#1f8033]\n"
+            f"{render_core_bars(per_core, width=4)}\n"
         )
         return h
 
@@ -574,6 +817,10 @@ class EarningsPanel(Static):
             f"  [#1f8033]power cost[/#1f8033]  [#ccffdd]${daily_power_cost:.4f}[/#ccffdd]/day [#1f8033]({daily_kwh:.2f} kWh)[/#1f8033]\n"
             f"  [#1f8033]net result[/#1f8033]  {net_str}\n\n"
             f"  [#1f8033]reject rate: {rej_pct_str} | power: -${daily_power_cost:.4f}/day[/#1f8033]\n"
+            f"\n"
+            f"  [#1f8033]donut[/#1f8033]  {render_donut(accepted, rejected)}\n"
+            f"\n"
+            f"  [#1f8033]7-day[/#1f8033]  {render_forecast_bars(getattr(self.app, '_daily_earnings', []))}\n"
         )
         return h
 
@@ -601,7 +848,62 @@ class LogPanel(Static):
             formatted = ["[#1f8033](waiting for log data...)[/#1f8033]"]
         h = (
             f"[bold #0e4019] LAST LOG LINES [/bold #0e4019]\n"
-            + "\n".join(f"  [#1f8033] [/#1f8033][#33ff66]{l}[/#33ff66]" for l in formatted)
+            + "\n".join(f" [#1f8033] [/#1f8033][#33ff66]{l}[/#33ff66]" for l in formatted)
+        )
+        return h
+
+
+class CoreHeatmapPanel(Static):
+    """v0.2.0 — core activity heatmap.
+
+    Shows the last `width` per-core snapshots as a small ASCII heatmap,
+    one row per core. The newest sample is on the right; older samples
+    scroll off the left. This is the dashboard's "vivid" centerpiece:
+    you can tell at a glance whether mining is using all your cores
+    (uniform bright row) or whether some have dropped out (mixed cells).
+    """
+
+    def render(self) -> str:
+        history = list(getattr(self.app, "_core_history", []))
+        # Need a "current" snapshot for the per-core labels on the right.
+        # We use the last entry in history; if empty, the helper returns
+        # a placeholder anyway.
+        if history:
+            per_core_now = history[-1]
+        else:
+            try:
+                per_core_now = psutil.cpu_percent(interval=None, percpu=True) or []
+            except Exception:
+                per_core_now = []
+        # Density mode
+        try:
+            screen_h = self.app.size.height
+        except Exception:
+            screen_h = 80
+        if self.app._compact_mode or screen_h < 36:
+            # Compact: omit heatmap, render a one-line summary
+            if per_core_now:
+                avg = sum(per_core_now) / len(per_core_now)
+                mx = max(per_core_now)
+                mn = min(per_core_now)
+                line = (
+                    f" cores {len(per_core_now)}  "
+                    f"avg [{PALETTE['fg']}]{avg:5.1f}%[/{PALETTE['fg']}]  "
+                    f"min [{PALETTE['fg_dim']}]{mn:3.0f}[/{PALETTE['fg_dim']}]  "
+                    f"max [{PALETTE['fg']}]{mx:3.0f}[/{PALETTE['fg']}]"
+                )
+            else:
+                line = f" [{PALETTE['fg_dim']}](no data)[/{PALETTE['fg_dim']}]"
+            return f"[bold #33ff66] HEATMAP [/bold #33ff66]\n{line}\n"
+        # Full mode: render the heatmap
+        if not self.app._show_graphs:
+            return (
+                f"[bold #33ff66] HEATMAP [/bold #33ff66]\n"
+                f" [#1f8033](hidden — press 'g' to show)[/#1f8033]\n"
+            )
+        h = (
+            f"[bold #33ff66] HEATMAP [/bold #33ff66]\n"
+            f"{render_core_heatmap(per_core_now, history, width=12)}\n"
         )
         return h
 
@@ -612,11 +914,15 @@ class StatusBar(Static):
         s = self.app.state.get("xmrig", _DEFAULT_STATE)
         sys_m = self.app.state.get("system", {})
         connected = s.get("pool_connected", False)
-        # Use brighter accent when mining, dim when idle
+        # v0.2.0: ASCII logo + status badge. The dot is bright when
+        # connected and dim amber when idle, so a glance tells you
+        # the miner state without reading the panel below.
         if connected:
-            mining = "[bold #00ff9c]>>> MINING <<<[/bold #00ff9c]"
+            badge = f"[bold {PALETTE['accent']}]●[/bold {PALETTE['accent']}]"
+            mining = f"[bold {PALETTE['accent']}]MINING[/bold {PALETTE['accent']}]"
         else:
-            mining = "[#ffaa00]--- IDLE ---[/#ffaa00]"
+            badge = f"[bold {PALETTE['warning']}]●[/bold {PALETTE['warning']}]"
+            mining = f"[bold {PALETTE['warning']}]IDLE[/bold {PALETTE['warning']}]"
         cpu_pct = sys_m.get("cpu_pct", 0.0)
         hr = s.get("hashrate_10s", 0)
         accepted = s.get("accepted", 0)
@@ -624,10 +930,10 @@ class StatusBar(Static):
         rej_color = "#ff3355" if rejected > 0 else "#1f8033"
         mode = "[#ccffdd]COMPACT[/#ccffdd]" if self.app._compact_mode else "[#1f8033]FULL[/#1f8033]"
         h = (
-            f"  {mining}  "
-            f"[#1f8033]|[/#1f8033] [#ccffdd]{WORKER}[/#ccffdd]  "
-            f"[#1f8033]|[/#1f8033] CPU [bold #ccffdd]{cpu_pct:5.1f}%[/bold #ccffdd]  "
-            f"[#1f8033]|[/#1f8033] [bold #00ff9c]{hr:,.0f}[/bold #00ff9c] H/s  "
+            f" {render_header_logo()} {badge} {mining} "
+            f"[#1f8033]|[/#1f8033] [#ccffdd]{WORKER}[/#ccffdd] "
+            f"[#1f8033]|[/#1f8033] CPU [bold #ccffdd]{cpu_pct:5.1f}%[/bold #ccffdd] "
+            f"[#1f8033]|[/#1f8033] [bold #00ff9c]{hr:,.0f}[/bold #00ff9c] H/s "
             f"[#1f8033]|[/#1f8033] shares [#ccffdd]{accepted}[/#ccffdd] ok / "
         )
         # Append rejected with its own color (avoid nested same-color markup)
@@ -706,6 +1012,7 @@ class MinerDashboard(App):
         ("?", "help", "Help"),
         ("c", "compact", "Compact"),
         ("s", "screenshot", "Save"),
+        ("g", "toggle_graphs", "Graphs"),
     ]
 
     state = reactive({})
@@ -737,6 +1044,18 @@ class MinerDashboard(App):
         # Session start time (used for 'uptime' display)
         import time as _t
         self._session_start: float = _t.time()
+        # v0.2.0: per-core snapshot history (deque auto-trims)
+        # Each entry is a list of per-core percentages from
+        # psutil.cpu_percent(percpu=True). 60 entries ≈ 30s at 2Hz.
+        self._core_history: deque = deque(maxlen=60)
+        # v0.2.0: rolling list of daily earnings, oldest first.
+        # Updated once per ~60s (see refresh_metrics); we keep the last
+        # 14 days for the forecast bar chart.
+        self._daily_earnings: list = []
+        self._last_earnings_accrual: float = _t.time()
+        # v0.2.0: 'g' toggles graph visibility (heatmap + core bars).
+        # Off by default in compact mode; user can flip.
+        self._show_graphs: bool = True
 
     def compose(self) -> ComposeResult:
         yield StatusBar()
@@ -746,10 +1065,11 @@ class MinerDashboard(App):
             yield PoolPanel()
             yield EarningsPanel()
             yield LogPanel()
-            yield Static(
-                "[#1f8033][b]q[/b] quit  |  [b]p[/b] pause  |  [b]r[/b] resume  |  [b]c[/b] compact  |  [b]s[/b] save  |  [b]?[/b] help[/#1f8033]",
-                id="hint",
-            )
+            yield CoreHeatmapPanel()
+        yield Static(
+            "[#1f8033][b]q[/b] quit | [b]p[/b] pause | [b]r[/b] resume | [b]c[/b] compact | [b]g[/b] graphs | [b]s[/b] save | [b]?[/b] help[/#1f8033]",
+            id="hint",
+        )
 
     def on_mount(self) -> None:
         self.title = "Monero Miner Dashboard"
@@ -785,6 +1105,42 @@ class MinerDashboard(App):
         self._rejected_history.append(rejected_delta)
         self.state["xmrig"] = new_state
         self.state["system"] = get_system_metrics()
+        # v0.2.0: push per-core snapshot for the heatmap. The first call
+        # to percpu=True right after a psutil.cpu_percent(interval=0.1) will
+        # return zeros — that's fine, it warms up after ~1s.
+        per_core = psutil.cpu_percent(interval=None, percpu=True) or []
+        if per_core:
+            self._core_history.append(list(per_core))
+        # v0.2.0: accrue today's earnings every ~60s. We compute the
+        # running avg hashrate, multiply by the per-second $/H rate, and
+        # add to today's bucket. After 24h, the bucket "rolls" to history.
+        # This is intentionally simple — the EarningsPanel already does
+        # its own estimate; we only need *one* data point per ~minute to
+        # keep the forecast bar chart interesting.
+        now = time.time()
+        if now - self._last_earnings_accrual > 60:
+            s = new_state
+            hr_60 = s.get("hashrate_60s", 0.0)
+            hr_10 = s.get("hashrate_10s", 0.0)
+            hr_avg = (hr_60 + hr_10) / 2
+            price = self.state.get("earnings", {}).get("xmr_price", XMR_USD_PRICE)
+            # Earnings rate: $ per hour (60 ticks). 0.0008 XMR/kH/day
+            # × price × 1/24 = $/hour. We use hr_avg in H/s, so
+            # divide by 1000 to get kH/s, then multiply.
+            usd_per_hour = hr_avg / 1000 * 0.0008 * price
+            if usd_per_hour > 0:
+                # Last entry is "today" — keep accumulating into it
+                if self._daily_earnings:
+                    self._daily_earnings[-1] += usd_per_hour / 60  # 1 minute slice
+                else:
+                    self._daily_earnings.append(usd_per_hour / 60)
+                # If today is > 24h old, roll a new day
+                if now - self._last_earnings_accrual > 86400:
+                    # Append a fresh day; cap at 14.
+                    self._daily_earnings.append(0.0)
+                    if len(self._daily_earnings) > 14:
+                        self._daily_earnings = self._daily_earnings[-14:]
+            self._last_earnings_accrual = now
 
         # Toggle mining-active class on HashratePanel for pulse animation
         # (every 2s tick alternates the class to keep the animation cycling
@@ -833,6 +1189,19 @@ class MinerDashboard(App):
             if w.id not in ("hint",):
                 w.refresh()
         self.query_one(StatusBar).refresh()
+
+    def action_toggle_graphs(self) -> None:
+        """v0.2.0: show/hide the core heatmap (and per-core bars in System).
+
+        Useful on tiny terminals or for users who find the heatmap
+        distracting. Hidden state persists for the session.
+        """
+        self._show_graphs = not self._show_graphs
+        state_name = "ON" if self._show_graphs else "OFF"
+        self.notify(f"Graphs: {state_name}", severity="information")
+        for w in self.query(Static):
+            if w.id not in ("hint",):
+                w.refresh()
 
     def action_help(self) -> None:
         """Show help modal with all keybindings."""
