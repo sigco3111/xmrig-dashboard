@@ -83,6 +83,23 @@ REFRESH_HZ = 2
 # How many recent log lines to keep in memory
 LOG_LINES = 200
 
+# Sparkline history length (60 samples = 30s at 2Hz)
+SPARKLINE_SAMPLES = 60
+
+# ---------- NMMiner cyberpunk-green palette ----------
+# All panel colors derive from these. Tweak in one place.
+PALETTE = {
+    "bg":          "#001100",  # deep terminal green-black
+    "bg_dark":     "#000800",  # status bar background
+    "fg":          "#33ff66",  # primary text
+    "fg_dim":      "#1f8033",  # dim text (de-emphasized)
+    "fg_faint":    "#0e4019",  # very dim (background grid, sparkline axis)
+    "accent":      "#00ff9c",  # bright accent (active indicators)
+    "warning":     "#ffaa00",  # amber (warnings, idle)
+    "error":       "#ff3355",  # red (errors, rejected)
+    "highlight":   "#ccffdd",  # near-white (numbers, current values)
+}
+
 
 # ---------- Config loading ----------
 
@@ -243,7 +260,7 @@ def estimate_power(cpu_pct: float) -> float:
 # ---------- TUI Widgets ----------
 
 class HashratePanel(Static):
-    """Real-time hashrate with progress bars."""
+    """Real-time hashrate with progress bars + sparkline."""
     def render(self) -> str:
         s = self.app.state.get("xmrig", _DEFAULT_STATE)
         hr_10 = s.get("hashrate_10s", 0.0)
@@ -257,12 +274,23 @@ class HashratePanel(Static):
             filled = pct // 5
             return f"{chr(0x2588) * filled}{chr(0x2591) * (20 - filled)} {pct:3d}%"
 
+        # Sparkline: render last 60 samples using Unicode block characters
+        # (lowest to highest: 1/8, 2/8, 3/8, ..., 8/8 = ▁▂▃▄▅▆▇█)
+        spark = ""
+        history = list(self.app._hr_history)
+        if history:
+            blocks = "▁▂▃▄▅▆▇█"
+            mn, mx = min(history), max(history)
+            rng = max(mx - mn, 1.0)
+            spark = "".join(blocks[min(7, int((v - mn) / rng * 7))] for v in history)
+
         h = (
-            f"[bold cyan] HASHRATE [/bold cyan]\n\n"
-            f"  10s:  {hr_10:>8,.1f} H/s   {bar(hr_10)}\n"
-            f"  60s:  {hr_60:>8,.1f} H/s   {bar(hr_60)}\n"
-            f"  15m:  {hr_15:>8,.1f} H/s   {bar(hr_15)}\n"
-            f"  max:  {hr_max:>8,.1f} H/s\n"
+            f"[bold #00ff9c] HASHRATE [/bold #00ff9c]\n\n"
+            f"  10s:  [bold #ccffdd]{hr_10:>8,.1f}[/bold #ccffdd] H/s   {bar(hr_10)}\n"
+            f"  60s:  [bold #ccffdd]{hr_60:>8,.1f}[/bold #ccffdd] H/s   {bar(hr_60)}\n"
+            f"  15m:  [bold #ccffdd]{hr_15:>8,.1f}[/bold #ccffdd] H/s   {bar(hr_15)}\n"
+            f"  max:  [bold #ccffdd]{hr_max:>8,.1f}[/bold #ccffdd] H/s\n"
+            f"\n  [{PALETTE['fg_faint']}]trend[/{PALETTE['fg_faint']}] [bold #33ff66]{spark}[/bold #33ff66]  [#1f8033](60s)[/#1f8033]\n"
         )
         return h
 
@@ -279,19 +307,47 @@ class SystemPanel(Static):
         uptime = s.get("uptime_s", 0.0)
         bar_full = chr(0x2588)
         bar_empty = chr(0x2591)
-        cpu_bar = f"{bar_full * (int(cpu_pct) // 5)}{bar_empty * (20 - int(cpu_pct) // 5)}"
-        mem_bar = f"{bar_full * (int(mem_pct) // 5)}{bar_empty * (20 - int(mem_pct) // 5)}"
-        temp_str = f"{temp:.0f}C" if temp else "n/a"
+        # Bars are concatenated as plain text, then wrapped in a single color tag.
+        # (Mixing two colors per bar caused Rich markup nesting issues.)
+        cpu_filled = int(cpu_pct) // 5
+        cpu_empty = 20 - cpu_filled
+        cpu_bar = f"[#33ff66]{bar_full * cpu_filled}[/#33ff66][#0e4019]{bar_empty * cpu_empty}[/#0e4019]"
+        mem_filled = int(mem_pct) // 5
+        mem_empty = 20 - mem_filled
+        mem_bar = f"[#33ff66]{bar_full * mem_filled}[/#33ff66][#0e4019]{bar_empty * mem_empty}[/#0e4019]"
+        # Temp: green < 70, amber 70-85, red >= 85
+        if temp is None:
+            temp_str = "[#1f8033]n/a[/#1f8033]"
+        elif temp >= 85:
+            temp_str = f"[bold #ff3355]{temp:.0f}C[/bold #ff3355]"
+        elif temp >= 70:
+            temp_str = f"[bold #ffaa00]{temp:.0f}C[/bold #ffaa00]"
+        else:
+            temp_str = f"[#ccffdd]{temp:.0f}C[/#ccffdd]"
         power = estimate_power(cpu_pct)
         cores = psutil.cpu_count() or 1
+
+        # Compact mode: drop the bars, keep just numbers
+        if self.app._compact_mode:
+            h = (
+                f"[bold #33ff66] SYSTEM [/bold #33ff66]\n\n"
+                f"  CPU [#ccffdd]{cpu_pct:5.1f}%[/#ccffdd] {temp_str}  "
+                f"[#1f8033]Cores {cores}[/#1f8033]\n"
+                f"  RAM [#ccffdd]{mem_pct:5.1f}%[/#ccffdd]  "
+                f"[#1f8033]{mem_used:.1f}/{mem_total:.1f} GB[/#1f8033]\n"
+                f"  PWR [#ccffdd]~{power:.0f}W[/#ccffdd]  "
+                f"UPTIME [#ccffdd]{int(uptime//3600)}h {int((uptime%3600)//60)}m[/#ccffdd]\n"
+            )
+            return h
+
         h = (
-            f"[bold magenta] SYSTEM [/bold magenta]\n\n"
-            f"  CPU    {cores}C/{cores}T  ~{cpu_pct*100/100:.0f}% load\n"
+            f"[bold #33ff66] SYSTEM [/bold #33ff66]\n\n"
+            f"  CPU    [#1f8033]{cores}C/{cores}T  ~{cpu_pct*100/100:.0f}% load[/#1f8033]\n"
             f"         {cpu_bar} {cpu_pct:5.1f}%  {temp_str}\n\n"
-            f"  RAM    {mem_used:.1f}/{mem_total:.1f} GB\n"
+            f"  RAM    [#1f8033]{mem_used:.1f}/{mem_total:.1f} GB[/#1f8033]\n"
             f"         {mem_bar} {mem_pct:5.1f}%\n\n"
-            f"  POWER  ~{power:.0f}W (estimated)\n"
-            f"  UPTIME {int(uptime//3600)}h {int((uptime%3600)//60)}m\n"
+            f"  POWER  [#ccffdd]~{power:.0f}W[/#ccffdd] [#1f8033](estimated)[/#1f8033]\n"
+            f"  UPTIME [#ccffdd]{int(uptime//3600)}h {int((uptime%3600)//60)}m[/#ccffdd]\n"
         )
         return h
 
@@ -300,17 +356,22 @@ class PoolPanel(Static):
     """Pool/connection status."""
     def render(self) -> str:
         s = self.app.state.get("xmrig", _DEFAULT_STATE)
-        status = "[+] connected" if s.get("pool_connected") else "[-] disconnected"
+        connected = s.get("pool_connected", False)
+        if connected:
+            status = "[bold #00ff9c]>>> CONNECTED <<<[/bold #00ff9c]"
+        else:
+            status = "[bold #ffaa00]--- DISCONNECTED ---[/bold #ffaa00]"
         pool_url = s.get("pool_url", "pool.supportxmr.com:5555") or "pool.supportxmr.com:5555"
         block = s.get("block_height", 0)
         threads_r = s.get("threads_ready", 0)
         threads_t = s.get("threads_total", 0)
+        threads_pct = int(threads_r * 100 / max(threads_t, 1))
         h = (
-            f"[bold yellow] POOL [/bold yellow]\n\n"
-            f"  {pool_url}\n"
-            f"  {status}\n\n"
-            f"  Block:  {block:,}\n"
-            f"  Threads: {threads_r}/{threads_t} ready\n"
+            f"[bold #1f8033] POOL [/bold #1f8033]\n\n"
+            f"  [#1f8033]host[/#1f8033] [#ccffdd]{pool_url}[/#ccffdd]\n"
+            f"  [#1f8033]stat[/#1f8033] {status}\n\n"
+            f"  [#1f8033]block[/#1f8033]    [#ccffdd]{block:,}[/#ccffdd]\n"
+            f"  [#1f8033]threads[/#1f8033]  [#ccffdd]{threads_r}/{threads_t}[/#ccffdd] ready [#1f8033]({threads_pct}%)[/#1f8033]\n"
         )
         return h
 
@@ -327,28 +388,50 @@ class EarningsPanel(Static):
         rejected = s.get("rejected", 0)
         last_share = s.get("last_share_time")
         price = e.get("xmr_price", XMR_USD_PRICE)
-        # Conservative estimate: 1 KH/s yields ~0.0008 XMR/day on Monero network
         xmr_per_day = hr_avg / 1000 * 0.0008
         usd_per_day = xmr_per_day * price
+        # Reject ratio for color
+        if accepted + rejected == 0:
+            rej_pct_str = "[#1f8033]--[/#1f8033]"
+        else:
+            rej_pct = rejected * 100 / (accepted + rejected)
+            if rej_pct > 5:
+                rej_pct_str = f"[bold #ff3355]{rej_pct:.1f}%[/bold #ff3355]"
+            elif rej_pct > 1:
+                rej_pct_str = f"[bold #ffaa00]{rej_pct:.1f}%[/bold #ffaa00]"
+            else:
+                rej_pct_str = f"[#33ff66]{rej_pct:.1f}%[/#33ff66]"
+
+        # Compact mode: collapse the forecast into one line
+        if self.app._compact_mode:
+            h = (
+                f"[bold #33ff66] MINING STATS [/bold #33ff66]\n\n"
+                f"  [#1f8033]shares[/#1f8033] [#ccffdd]{accepted}[/#ccffdd] ok / [bold #ff3355]{rejected}[/bold #ff3355] bad\n"
+                f"  [#1f8033]last[/#1f8033]   [#ccffdd]{last_share or 'n/a'}[/#ccffdd]\n"
+                f"  [#1f8033]est/day[/#1f8033] [#ccffdd]{usd_per_day:.4f}[/#ccffdd] [#1f8033]@ ${price:.2f}[/#1f8033]\n"
+            )
+            return h
+
         h = (
-            f"[bold green] MINING STATS [/bold green]\n\n"
-            f"  Accepted:   {accepted:>5d}\n"
-            f"  Rejected:   {rejected:>5d}\n"
-            f"  Last share: {last_share or 'n/a'}\n\n"
-            f"  EARNINGS ESTIMATE (XMR: ${price:.2f})\n"
-            f"  Daily:      {xmr_per_day:.6f} XMR  (${usd_per_day:.4f})\n"
-            f"  Monthly:    {xmr_per_day*30:.4f} XMR  (${usd_per_day*30:.2f})\n"
-            f"  Yearly:     {xmr_per_day*365:.3f} XMR  (${usd_per_day*365:.2f})\n\n"
-            f"  Power cost: ~$1.50/mo - net: -$0.30/mo\n"
+            f"[bold #33ff66] MINING STATS [/bold #33ff66]\n\n"
+            f"  [#1f8033]accepted[/#1f8033]   [#ccffdd]{accepted:>5d}[/#ccffdd]\n"
+            f"  [#1f8033]rejected[/#1f8033]   [bold #ff3355]{rejected:>5d}[/bold #ff3355]\n"
+            f"  [#1f8033]last share[/#1f8033] [#ccffdd]{last_share or 'n/a'}[/#ccffdd]\n\n"
+            f"  [bold #ccffdd]EARNINGS ESTIMATE[/bold #ccffdd] [#1f8033](XMR: ${price:.2f})[/#1f8033]\n"
+            f"  [#1f8033]daily[/#1f8033]      [#ccffdd]{xmr_per_day:.6f}[/#ccffdd] XMR  [#1f8033]=[/#1f8033] [#ccffdd]${usd_per_day:.4f}[/#ccffdd]\n"
+            f"  [#1f8033]monthly[/#1f8033]    [#ccffdd]{xmr_per_day*30:.4f}[/#ccffdd] XMR  [#1f8033]=[/#1f8033] [#ccffdd]${usd_per_day*30:.2f}[/#ccffdd]\n"
+            f"  [#1f8033]yearly[/#1f8033]     [#ccffdd]{xmr_per_day*365:.3f}[/#ccffdd] XMR  [#1f8033]=[/#1f8033] [#ccffdd]${usd_per_day*365:.2f}[/#ccffdd]\n\n"
+            f"  [#1f8033]reject rate: {rej_pct_str} | power: ~$1.50/mo - net: -$0.30/mo[/#1f8033]\n"
         )
         return h
 
-
 class LogPanel(Static):
-    """Recent XMRig log lines."""
+    """Recent XMRig log lines — terminal-green styled."""
     def render(self) -> str:
         s = self.app.state.get("xmrig", _DEFAULT_STATE)
-        lines = list(s.get("recent_log", []))[-8:]
+        # Compact mode: fewer lines, tighter
+        max_lines = 3 if self.app._compact_mode else 8
+        lines = list(s.get("recent_log", []))[-max_lines:]
         # Strip markup characters from log lines to avoid Rich markup conflicts
         formatted = []
         for ln in lines:
@@ -357,28 +440,46 @@ class LogPanel(Static):
                 ln = ln[-90:]
             formatted.append(ln[:90])
         if not formatted:
-            formatted = ["(waiting for log data...)"]
+            formatted = ["[#1f8033](waiting for log data...)[/#1f8033]"]
         h = (
-            f"[bold white] LAST LOG LINES [/bold white]\n\n"
-            + "\n".join(f"  {l}" for l in formatted)
+            f"[bold #0e4019] LAST LOG LINES [/bold #0e4019]\n\n"
+            + "\n".join(f"  [#1f8033]>[/#1f8033] [#33ff66]{l}[/#33ff66]" for l in formatted)
         )
         return h
 
 
 class StatusBar(Static):
-    """Top status bar."""
+    """Top status bar — NMMiner cyberpunk green, one-line summary."""
     def render(self) -> str:
         s = self.app.state.get("xmrig", _DEFAULT_STATE)
         sys_m = self.app.state.get("system", {})
-        mining = "[*] MINING" if s.get("pool_connected") else "[ ] IDLE"
+        connected = s.get("pool_connected", False)
+        # Use brighter accent when mining, dim when idle
+        if connected:
+            mining = "[bold #00ff9c]>>> MINING <<<[/bold #00ff9c]"
+        else:
+            mining = "[#ffaa00]--- IDLE ---[/#ffaa00]"
         cpu_pct = sys_m.get("cpu_pct", 0.0)
+        hr = s.get("hashrate_10s", 0)
+        accepted = s.get("accepted", 0)
+        rejected = s.get("rejected", 0)
+        rej_color = "#ff3355" if rejected > 0 else "#1f8033"
+        mode = "[#ccffdd]COMPACT[/#ccffdd]" if self.app._compact_mode else "[#1f8033]FULL[/#1f8033]"
         h = (
-            f"  [bold green]{mining}[/bold green]  |  "
-            f"Worker: {WORKER}  |  "
-            f"CPU: {cpu_pct:5.1f}%  |  "
-            f"Hash: {s.get('hashrate_10s', 0):,.0f} H/s  |  "
-            f"Shares: {s.get('accepted', 0)} ok / {s.get('rejected', 0)} bad  |  "
-            f"{datetime.now().strftime('%H:%M:%S')}"
+            f"  {mining}  "
+            f"[#1f8033]|[/#1f8033] [#ccffdd]{WORKER}[/#ccffdd]  "
+            f"[#1f8033]|[/#1f8033] CPU [bold #ccffdd]{cpu_pct:5.1f}%[/bold #ccffdd]  "
+            f"[#1f8033]|[/#1f8033] [bold #00ff9c]{hr:,.0f}[/bold #00ff9c] H/s  "
+            f"[#1f8033]|[/#1f8033] shares [#ccffdd]{accepted}[/#ccffdd] ok / "
+        )
+        # Append rejected with its own color (avoid nested same-color markup)
+        if rejected > 0:
+            h += f"[bold #ff3355]{rejected}[/bold #ff3355] bad  "
+        else:
+            h += f"[#1f8033]{rejected}[/#1f8033] bad  "
+        h += (
+            f"[#1f8033]|[/#1f8033] mode {mode}  "
+            f"[#1f8033]|[/#1f8033] [#ccffdd]{datetime.now().strftime('%H:%M:%S')}[/#ccffdd]"
         )
         return h
 
@@ -386,37 +487,65 @@ class StatusBar(Static):
 # ---------- Main App ----------
 
 class MinerDashboard(App):
-    CSS = """
-    Screen {
-        background: #0a0a0a;
-    }
-    #main {
+    CSS = f"""
+    Screen {{
+        background: {PALETTE['bg']};
+        color: {PALETTE['fg']};
+    }}
+    #main {{
         layout: grid;
         grid-size: 2 3;
         grid-gutter: 1;
         padding: 1;
-    }
-    HashratePanel, SystemPanel, PoolPanel, EarningsPanel, LogPanel {
-        border: solid #444;
+    }}
+    HashratePanel, SystemPanel, PoolPanel, EarningsPanel, LogPanel {{
+        border: solid {PALETTE['fg_dim']};
         padding: 1;
-    }
-    HashratePanel { border: solid cyan; }
-    SystemPanel { border: solid magenta; }
-    PoolPanel { border: solid yellow; }
-    EarningsPanel { border: solid green; }
-    LogPanel { border: solid white; }
-    StatusBar {
+        background: {PALETTE['bg']};
+    }}
+    /* All panel borders in cyberpunk green; brightness varies by role */
+    HashratePanel {{ border: solid {PALETTE['accent']}; }}
+    SystemPanel   {{ border: solid {PALETTE['fg']}; }}
+    PoolPanel     {{ border: solid {PALETTE['fg_dim']}; }}
+    EarningsPanel {{ border: solid {PALETTE['fg']}; }}
+    LogPanel      {{ border: solid {PALETTE['fg_faint']}; }}
+    /* Pulse states: alternated by refresh tick to simulate animation */
+    HashratePanel.-mining-active {{
+        border: solid {PALETTE['accent']};
+    }}
+    HashratePanel.-mining-active.-pulse-bright {{
+        border: solid {PALETTE['highlight']};
+    }}
+    StatusBar {{
         dock: top;
         height: 1;
-        background: #1a1a1a;
-        color: #ccc;
-    }
-    #hint {
+        background: {PALETTE['bg_dark']};
+        color: {PALETTE['fg']};
+    }}
+    #hint {{
         height: 1;
-        color: #888;
+        color: {PALETTE['fg_dim']};
         text-align: center;
-    }
+    }}
+    /* Help modal styling */
+    HelpModal {{
+        background: {PALETTE['bg']};
+        border: thick {PALETTE['accent']};
+        padding: 1 2;
+    }}
+    HelpModal Label {{
+        color: {PALETTE['fg']};
+    }}
     """
+
+    BINDINGS = [
+        ("p", "pause", "Pause"),
+        ("r", "resume", "Resume"),
+        ("q", "quit", "Quit"),
+        ("?", "help", "Help"),
+        ("c", "compact", "Compact"),
+        ("s", "screenshot", "Save"),
+    ]
 
     state = reactive({})
 
@@ -437,6 +566,12 @@ class MinerDashboard(App):
             "running": True,
         }
         self._last_price_fetch = 0
+        # History buffers for sparkline graphs (deque auto-trims to SPARKLINE_SAMPLES)
+        self._hr_history: deque = deque(maxlen=SPARKLINE_SAMPLES)
+        self._accepted_history: deque = deque(maxlen=SPARKLINE_SAMPLES)
+        self._compact_mode: bool = False
+        # Tick counter for pulse animation toggle (every 2s)
+        self._tick_count: int = 0
 
     def compose(self) -> ComposeResult:
         yield StatusBar()
@@ -446,7 +581,10 @@ class MinerDashboard(App):
             yield PoolPanel()
             yield EarningsPanel()
             yield LogPanel()
-            yield Static("Press q to quit  |  p pause  |  r resume", id="hint")
+            yield Static(
+                "[#1f8033][b]q[/b] quit  |  [b]p[/b] pause  |  [b]r[/b] resume  |  [b]c[/b] compact  |  [b]s[/b] save  |  [b]?[/b] help[/#1f8033]",
+                id="hint",
+            )
 
     def on_mount(self) -> None:
         self.title = "Monero Miner Dashboard"
@@ -465,8 +603,39 @@ class MinerDashboard(App):
             self.fetch_price()
             self._last_price_fetch = now
 
-        self.state["xmrig"] = parse_xmrig_log(XMRIG_LOG)
+        new_state = parse_xmrig_log(XMRIG_LOG)
+        # Push current hashrate into history for sparkline
+        hr_10 = new_state.get("hashrate_10s", 0.0)
+        if hr_10 > 0:
+            self._hr_history.append(hr_10)
+        # Count accepted deltas for accepted/min sparkline
+        new_accepted = new_state.get("accepted", 0)
+        old_accepted = self.state.get("xmrig", {}).get("accepted", 0)
+        delta = max(0, new_accepted - old_accepted)
+        self._accepted_history.append(delta)
+        self.state["xmrig"] = new_state
         self.state["system"] = get_system_metrics()
+
+        # Toggle mining-active class on HashratePanel for pulse animation
+        # (every 2s tick alternates the class to keep the animation cycling
+        # even when there's no state change)
+        self._tick_count += 1
+        if self._tick_count % 2 == 0:
+            try:
+                panel = self.query_one(HashratePanel)
+                connected = self.state["xmrig"].get("pool_connected", False)
+                # Two classes: -mining-active (base) + -pulse-bright (alternates)
+                if connected and not panel.has_class("-mining-active"):
+                    panel.add_class("-mining-active")
+                elif not connected and panel.has_class("-mining-active"):
+                    panel.remove_class("-mining-active")
+                # Pulse: toggle -pulse-bright on alternating ticks for "breathing" effect
+                if self._tick_count % 4 == 0:
+                    panel.add_class("-pulse-bright")
+                else:
+                    panel.remove_class("-pulse-bright")
+            except Exception:
+                pass
 
         # Force re-render
         for w in self.query(Static):
@@ -484,15 +653,69 @@ class MinerDashboard(App):
         subprocess.run(["pkill", "-CONT", "-f", "xmrig --config"], check=False)
         self.notify("Mining resumed", severity="information")
 
+    def action_compact(self) -> None:
+        """Toggle compact mode (less padding, fewer log lines, no bars)."""
+        self._compact_mode = not self._compact_mode
+        mode_name = "COMPACT" if self._compact_mode else "FULL"
+        self.notify(f"Mode: {mode_name}", severity="information")
+        # Re-render all panels
+        for w in self.query(Static):
+            if w.id not in ("hint",):
+                w.refresh()
+        self.query_one(StatusBar).refresh()
+
+    def action_help(self) -> None:
+        """Show help modal with all keybindings."""
+        from textual.widgets import Label
+        from textual.containers import Vertical as V
+        from textual.screen import ModalScreen
+
+        class HelpModal(ModalScreen):
+            BINDINGS = [("escape,q,?", "dismiss", "Close")]
+
+            def compose(self):
+                yield V(
+                    Label("[bold #00ff9c]XMRig Dashboard — Keys[/bold #00ff9c]"),
+                    Label(""),
+                    Label("[#33ff66]p[/#33ff66]   Pause mining (SIGSTOP)"),
+                    Label("[#33ff66]r[/#33ff66]   Resume mining (SIGCONT)"),
+                    Label("[#33ff66]c[/#33ff66]   Toggle COMPACT / FULL mode"),
+                    Label("[#33ff66]s[/#33ff66]   Save snapshot to disk"),
+                    Label("[#33ff66]?[/#33ff66]   Show this help"),
+                    Label("[#33ff66]q[/#33ff66]   Quit dashboard"),
+                    Label(""),
+                    Label("[#1f8033]XMRig keeps running when dashboard quits.[/#1f8033]"),
+                    Label("[#1f8033]Press ESC or q to close.[/#1f8033]"),
+                    id="help-modal",
+                )
+
+            def action_dismiss(self):
+                self.dismiss()
+
+        self.push_screen(HelpModal())
+
+    def action_screenshot(self) -> None:
+        """Save a snapshot of the current dashboard state to disk."""
+        import json
+        from pathlib import Path
+        snap_dir = Path.home() / ".xmrig" / "snapshots"
+        snap_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+        snap_path = snap_dir / f"snapshot-{ts}.json"
+        snapshot = {
+            "timestamp": ts,
+            "xmrig": dict(self.state.get("xmrig", {})),
+            "system": dict(self.state.get("system", {})),
+            "earnings": dict(self.state.get("earnings", {})),
+            "hr_history": list(self._hr_history),
+        }
+        with snap_path.open("w") as f:
+            json.dump(snapshot, f, indent=2, default=str)
+        self.notify(f"Saved: {snap_path.name}", severity="information")
+
     def action_quit(self) -> None:
         self.notify("Goodbye!", severity="information")
         self.exit()
-
-    BINDINGS = [
-        ("p", "pause", "Pause"),
-        ("r", "resume", "Resume"),
-        ("q", "quit", "Quit"),
-    ]
 
 
 def main() -> None:
