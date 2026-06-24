@@ -413,7 +413,13 @@ class PoolPanel(Static):
 
 
 class EarningsPanel(Static):
-    """Mining stats + earnings estimate + network share + break-even."""
+    """Mining stats + earnings estimate + network share + break-even.
+
+    Renders in three density modes:
+    - tiny (<=24 lines): essentials only, 6 lines
+    - compact (25-40 lines): essentials + break-even, 8 lines
+    - full (40+ lines): full forecast breakdown, ~16 lines
+    """
     def render(self) -> str:
         import time as _t
         s = self.app.state.get("xmrig", _DEFAULT_STATE)
@@ -439,7 +445,7 @@ class EarningsPanel(Static):
             else:
                 rej_pct_str = f"[#33ff66]{rej_pct:.1f}%[/#33ff66]"
 
-        # === New: network share ===
+        # === Network share ===
         network_share = hr_avg / MONERO_NETWORK_HASHRATE_HPS * 100
         if network_share < 0.0001:
             share_str = f"[#1f8033]{network_share:.6f}%[/#1f8033]"
@@ -449,7 +455,7 @@ class EarningsPanel(Static):
             share_str = f"[#ccffdd]{network_share:.4f}%[/#ccffdd]"
         net_ghs = MONERO_NETWORK_HASHRATE_HPS / 1e9
 
-        # === New: session statistics ===
+        # === Session statistics ===
         session_secs = _t.time() - self.app._session_start
         session_h = int(session_secs // 3600)
         session_m = int((session_secs % 3600) // 60)
@@ -461,8 +467,7 @@ class EarningsPanel(Static):
         else:
             sess_per_hour = 0
 
-        # === New: break-even analysis ===
-        # 45W × 24h = 1080 Wh = 1.08 kWh/day. At $0.13/kWh = $0.14/day
+        # === Break-even analysis ===
         daily_kwh = ESTIMATED_MINING_WATTS * 24 / 1000
         daily_power_cost = daily_kwh * POWER_COST_PER_KWH
         if usd_per_day > 0:
@@ -476,18 +481,50 @@ class EarningsPanel(Static):
         else:
             net_str = "[#1f8033]n/a[/#1f8033]"
 
-        # Compact mode: collapse to essentials
+        # === Density mode (auto-detect from window size + manual override) ===
+        # Available height = total screen height minus 2 (status bar) minus 1 (hint) = h-3
+        # Each panel row is 3 high (header + 2 spacing in grid), so 2 rows of panels
+        # get ~ (h-3) / 2 height each.
+        # Heights: <30 tiny, 30-39 compact, 40+ full
+        try:
+            screen_h = self.app.size.height
+        except Exception:
+            screen_h = 80
+        available = max(20, screen_h - 3) // 3  # approximate per-panel height
         if self.app._compact_mode:
-            h = (
+            mode = "compact"
+        elif screen_h < 30:
+            mode = "tiny"
+        elif screen_h < 42:
+            mode = "compact"
+        else:
+            mode = "full"
+
+        # === TINY mode: absolute essentials, 6 lines ===
+        if mode == "tiny":
+            return (
                 f"[bold #33ff66] MINING STATS [/bold #33ff66]\n\n"
                 f"  [#1f8033]shares[/#1f8033] [#ccffdd]{accepted}[/#ccffdd] ok / [bold #ff3355]{rejected}[/bold #ff3355] bad\n"
                 f"  [#1f8033]session[/#1f8033] [#ccffdd]{session_h}h{session_m:02d}m[/#ccffdd] [#1f8033]({sess_per_hour:.1f}/h)[/#1f8033]\n"
+                f"  [#1f8033]est/day[/#1f8033] [#ccffdd]${usd_per_day:.4f}[/#ccffdd] [#1f8033]@ ${price:.2f}[/#1f8033]\n"
                 f"  [#1f8033]net share[/#1f8033] {share_str} [dim #1f8033]of {net_ghs:.1f}GH/s[/dim #1f8033]\n"
-                f"  [#1f8033]est/day[/#1f8033] [#ccffdd]{usd_per_day:.4f}[/#ccffdd] [#1f8033]@ ${price:.2f}[/#1f8033]\n"
                 f"  [#1f8033]break-even[/#1f8033] {net_str}\n"
             )
-            return h
 
+        # === COMPACT mode: essentials + break-even, 8-10 lines ===
+        if mode == "compact":
+            return (
+                f"[bold #33ff66] MINING STATS [/bold #33ff66]\n\n"
+                f"  [#1f8033]accepted[/#1f8033]   [#ccffdd]{accepted:>5d}[/#ccffdd]   [#1f8033]rejected[/#1f8033] [bold #ff3355]{rejected:>5d}[/bold #ff3355]\n"
+                f"  [#1f8033]session[/#1f8033]    [#ccffdd]{session_h}h{session_m:02d}m[/#ccffdd] [#1f8033]({sess_per_hour:.1f} shares/h)[/#1f8033]\n"
+                f"  [#1f8033]last share[/#1f8033] [#ccffdd]{last_share or 'n/a'}[/#ccffdd]\n\n"
+                f"  [bold #ccffdd]EARNINGS[/bold #ccffdd] [#1f8033](XMR: ${price:.2f})[/#1f8033] [#ccffdd]${usd_per_day:.4f}/day[/#ccffdd]\n"
+                f"  [#1f8033]net share[/#1f8033]  {share_str} [dim #1f8033]of {net_ghs:.1f}GH/s[/dim #1f8033]\n"
+                f"  [#1f8033]break-even[/#1f8033]  {net_str}\n"
+                f"  [dim #1f8033]reject rate: {rej_pct_str} | power: -${daily_power_cost:.4f}/day[/#1f8033]\n"
+            )
+
+        # === FULL mode: complete forecast, ~16 lines ===
         h = (
             f"[bold #33ff66] MINING STATS [/bold #33ff66]\n\n"
             f"  [#1f8033]accepted[/#1f8033]   [#ccffdd]{accepted:>5d}[/#ccffdd]\n"
