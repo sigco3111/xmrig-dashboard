@@ -274,15 +274,40 @@ class HashratePanel(Static):
             filled = pct // 5
             return f"{chr(0x2588) * filled}{chr(0x2591) * (20 - filled)} {pct:3d}%"
 
-        # Sparkline: render last 60 samples using Unicode block characters
-        # (lowest to highest: 1/8, 2/8, 3/8, ..., 8/8 = ▁▂▃▄▅▆▇█)
+        # Dual-line sparkline: hashrate trend (green blocks) with
+        # rejected-share markers (red dots) overlaid at the same x position.
+        # Each character position is one sample.
         spark = ""
         history = list(self.app._hr_history)
+        rejected_hist = list(self.app._rejected_history)
         if history:
             blocks = "▁▂▃▄▅▆▇█"
             mn, mx = min(history), max(history)
             rng = max(mx - mn, 1.0)
-            spark = "".join(blocks[min(7, int((v - mn) / rng * 7))] for v in history)
+            # Build a list of (char, has_reject) tuples then join with markup
+            chars = []
+            for i, v in enumerate(history):
+                block = blocks[min(7, int((v - mn) / rng * 7))]
+                # Mark rejected share with red dot overlay
+                has_reject = i < len(rejected_hist) and rejected_hist[i] > 0
+                chars.append((block, has_reject))
+            # Use Rich markup: red '●' for reject position, green block otherwise.
+            # We layer reject marker above block by using a single char per slot.
+            spark_parts = []
+            for block, has_reject in chars:
+                if has_reject:
+                    # Replace block with red dot to overlay the reject position
+                    spark_parts.append(f"[bold #ff3355]●[/bold #ff3355]")
+                else:
+                    spark_parts.append(f"[bold #33ff66]{block}[/bold #33ff66]")
+            spark = "".join(spark_parts)
+
+        # Compute reject rate for the legend
+        rej_rate_pct = 0.0
+        total_acc = sum(self.app._accepted_history)
+        total_rej = sum(self.app._rejected_history)
+        if total_acc + total_rej > 0:
+            rej_rate_pct = total_rej * 100 / (total_acc + total_rej)
 
         h = (
             f"[bold #00ff9c] HASHRATE [/bold #00ff9c]\n\n"
@@ -290,7 +315,7 @@ class HashratePanel(Static):
             f"  60s:  [bold #ccffdd]{hr_60:>8,.1f}[/bold #ccffdd] H/s   {bar(hr_60)}\n"
             f"  15m:  [bold #ccffdd]{hr_15:>8,.1f}[/bold #ccffdd] H/s   {bar(hr_15)}\n"
             f"  max:  [bold #ccffdd]{hr_max:>8,.1f}[/bold #ccffdd] H/s\n"
-            f"\n  [{PALETTE['fg_faint']}]trend[/{PALETTE['fg_faint']}] [bold #33ff66]{spark}[/bold #33ff66]  [#1f8033](60s)[/#1f8033]\n"
+            f"\n  [{PALETTE['fg_faint']}]trend[/{PALETTE['fg_faint']}] {spark}  [dim #1f8033](60s · reject: {rej_rate_pct:.1f}%)[/dim #1f8033]\n"
         )
         return h
 
@@ -572,9 +597,13 @@ class MinerDashboard(App):
         # History buffers for sparkline graphs (deque auto-trims to SPARKLINE_SAMPLES)
         self._hr_history: deque = deque(maxlen=SPARKLINE_SAMPLES)
         self._accepted_history: deque = deque(maxlen=SPARKLINE_SAMPLES)
+        self._rejected_history: deque = deque(maxlen=SPARKLINE_SAMPLES)
         self._compact_mode: bool = False
         # Tick counter for pulse animation toggle (every 2s)
         self._tick_count: int = 0
+        # Session start time (used for 'uptime' display)
+        import time as _t
+        self._session_start: float = _t.time()
 
     def compose(self) -> ComposeResult:
         yield StatusBar()
@@ -611,11 +640,16 @@ class MinerDashboard(App):
         hr_10 = new_state.get("hashrate_10s", 0.0)
         if hr_10 > 0:
             self._hr_history.append(hr_10)
-        # Count accepted deltas for accepted/min sparkline
+        # Count accepted/rejected deltas for sparkline
         new_accepted = new_state.get("accepted", 0)
-        old_accepted = self.state.get("xmrig", {}).get("accepted", 0)
-        delta = max(0, new_accepted - old_accepted)
-        self._accepted_history.append(delta)
+        new_rejected = new_state.get("rejected", 0)
+        old_xmrig = self.state.get("xmrig", {})
+        old_accepted = old_xmrig.get("accepted", 0)
+        old_rejected = old_xmrig.get("rejected", 0)
+        accepted_delta = max(0, new_accepted - old_accepted)
+        rejected_delta = max(0, new_rejected - old_rejected)
+        self._accepted_history.append(accepted_delta)
+        self._rejected_history.append(rejected_delta)
         self.state["xmrig"] = new_state
         self.state["system"] = get_system_metrics()
 
