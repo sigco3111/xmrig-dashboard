@@ -40,9 +40,35 @@ from textual.widgets import Static
 
 # ---------- Configuration ----------
 
-# Resolve paths from environment or fall back to standard locations
-XMRIG_LOG = Path(os.environ.get("XMRIG_LOG", str(Path.home() / ".xmrig" / "xmrig.log")))
-XMRIG_CONFIG = Path(os.environ.get("XMRIG_CONFIG", str(Path.home() / ".xmrig" / "xmrig-config.json")))
+# Resolve paths from environment or fall back to standard locations.
+# We try a list of candidate paths so the dashboard works for both
+# "XMRig in ~/.xmrig/" (recommended setup) and "XMRig in $HOME/" (common default).
+_DEFAULT_LOG_CANDIDATES = [
+    Path.home() / ".xmrig" / "xmrig.log",
+    Path.home() / "xmrig.log",
+    Path("/tmp/xmrig.log"),
+]
+_DEFAULT_CONFIG_CANDIDATES = [
+    Path.home() / ".xmrig" / "xmrig-config.json",
+    Path.home() / "xmrig-config.json",
+]
+
+
+def _resolve_path(env_var: str, candidates: list, label: str) -> Path:
+    """Pick the first existing path from env var or candidate list."""
+    env_val = os.environ.get(env_var)
+    if env_val:
+        return Path(env_val)
+    for c in candidates:
+        if c.exists():
+            return c
+    # None of the candidates exist; return the first one anyway so the
+    # caller can show a meaningful "not found" path to the user.
+    return candidates[0]
+
+
+XMRIG_LOG = _resolve_path("XMRIG_LOG", _DEFAULT_LOG_CANDIDATES, "log")
+XMRIG_CONFIG = _resolve_path("XMRIG_CONFIG", _DEFAULT_CONFIG_CANDIDATES, "config")
 
 # Default values (overridden from config file at startup)
 WALLET = "your_monero_wallet_address_here"
@@ -470,16 +496,31 @@ class MinerDashboard(App):
 
 
 def main() -> None:
+    # Resolve paths first so the user sees where we're looking
+    print(f"XMRig log:        {XMRIG_LOG}  {'[OK]' if XMRIG_LOG.exists() else '[NOT FOUND]'}")
+    print(f"XMRig config:     {XMRIG_CONFIG}  {'[OK]' if XMRIG_CONFIG.exists() else '[NOT FOUND]'}")
+    print()
+
     # Load wallet/worker from xmrig config
     load_xmrig_config(XMRIG_CONFIG)
 
     # Sanity warnings (non-fatal)
-    if not XMRIG_LOG.exists():
-        print(f"WARNING: XMRig log not found at {XMRIG_LOG}")
-        print(f"  Set XMRIG_LOG env var to the correct path, or start XMRig first.")
     if not XMRIG_CONFIG.exists():
         print(f"WARNING: XMRig config not found at {XMRIG_CONFIG}")
-        print(f"  Set XMRIG_CONFIG env var to the correct path.")
+        print(f"  Tried: {[str(c) for c in _DEFAULT_CONFIG_CANDIDATES]}")
+        print(f"  Set XMRIG_CONFIG env var to the correct path,")
+        print(f"  or symlink your config into one of the above locations.")
+        print()
+
+    if not XMRIG_LOG.exists():
+        print(f"WARNING: XMRig log not found at {XMRIG_LOG}")
+        print(f"  Tried: {[str(c) for c in _DEFAULT_LOG_CANDIDATES]}")
+        print(f"  Set XMRIG_LOG env var to the correct path,")
+        print(f"  or start XMRig first.")
+        print(f"  The dashboard will still start, but XMRig-related panels")
+        print(f"  (hashrate, pool, stats, logs) will stay empty until the log")
+        print(f"  file appears.")
+        print()
 
     app = MinerDashboard()
     app.run()
